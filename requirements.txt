@@ -3,3 +3,4 @@ uvicorn
 pymongo
 jinja2
 pydantic
+pytz

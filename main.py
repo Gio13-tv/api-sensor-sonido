@@ -6,6 +6,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
 from pymongo import MongoClient
+import pytz  # <-- CORREGIDO: Importación limpia en su propia línea
 
 app = FastAPI()
 
@@ -22,11 +23,12 @@ coleccion = db["registrossonido"]
 class SensorData(BaseModel):
     valor_bruto: int
 
-#  ENDPOINT PARA RECIBIR DATOS DEL ESP32
+# ENDPOINT PARA RECIBIR DATOS DEL ESP32
 @app.post("/api/datos")
 async def recibir_datos(data: SensorData):
     # Convierte a porcentaje aproximado (0 a 100) basado en el rango del ESP32 (0-4095)
-    porcentaje = min(int((data.valor_bruto / 4095) * 100), 100)
+    valor_tope = 700
+    porcentaje = min(int((data.valor_bruto / valor_tope) * 100), 100)
     
     # Clasificación automática en el Backend 
     if porcentaje < 20:
@@ -39,7 +41,9 @@ async def recibir_datos(data: SensorData):
         categoria = "Ruido Alto"
         alerta = True # Dispara alerta si el escándalo es fuerte
 
-    ahora = datetime.now()
+    # CORREGIDO: Configura la zona horaria de México para solucionar el desfase de Render
+    zona_horaria_mx = pytz.timezone("America/Mexico_City")
+    ahora = datetime.now(zona_horaria_mx)
 
     # Estructura del documento para MongoDB
     documento = {
