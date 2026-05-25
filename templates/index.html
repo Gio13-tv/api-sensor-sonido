@@ -1,0 +1,143 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AcousticWatch Panel</title>
+    <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+</head>
+<body class="bg-slate-950 text-slate-100 min-height-screen font-sans p-6">
+
+    <div class="max-w-5xl mx-auto space-y-6">
+        <header class="flex justify-between items-center border-b border-slate-800 pb-4">
+            <h1 class="text-3xl font-bold tracking-tight text-cyan-400">SONIDOc<span class="text-white">CARE</span></h1>
+            <span class="bg-emerald-500/10 text-emerald-400 text-xs font-medium px-2.5 py-0.5 rounded-full border border-emerald-500/20">Sistema Activo</span>
+        </header>
+
+        <div class="bg-slate-900 border border-slate-800 rounded-xl p-6 shadow-xl">
+            <h2 class="text-xl font-semibold mb-4 text-slate-300">Monitoreo de Ruido en Vivo</h2>
+            <div class="h-64">
+                <canvas id="graficaTiempoReal"></canvas>
+            </div>
+        </div>
+
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+            <div class="md:col-span-1 bg-slate-900 border border-slate-800 rounded-xl p-6 flex flex-col gap-4">
+                <h3 class="text-lg font-medium text-slate-200">Consultas de Base de Datos</h3>
+                <p class="text-sm text-slate-400">Ejecuta filtros directamente sobre tu clúster de MongoDB Atlas.</p>
+                
+                <button onclick="cargarTiempoReal()" class="w-full bg-cyan-600 hover:bg-cyan-500 text-white font-medium py-2 px-4 rounded-lg transition">
+                    Ver Flujo En Vivo
+                </button>
+                <button onclick="filtrarAlertas()" class="w-full bg-red-950 hover:bg-red-900 text-red-200 font-medium py-2 px-4 rounded-lg border border-red-800/50 transition">
+                    Filtrar Alertas Críticas
+                </button>
+            </div>
+
+            <div class="md:col-span-2 bg-slate-900 border border-slate-800 rounded-xl p-6">
+                <h3 id="tituloTabla" class="text-lg font-medium text-slate-200 mb-4">Últimos Registros Guardados</h3>
+                <div class="overflow-x-auto max-h-48 scrollbar-thin">
+                    <table class="w-full text-sm text-left text-slate-400">
+                        <thead class="text-xs text-slate-300 uppercase bg-slate-800/50">
+                            <tr>
+                                <th class="px-4 py-3">Hora</th>
+                                <th class="px-4 py-3">Categoría</th>
+                                <th class="px-4 py-3">Porcentaje</th>
+                            </tr>
+                        </thead>
+                        <tbody id="tablaCuerpo">
+                            </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Configuración Inicial de la Gráfica
+        const ctx = document.getElementById('graficaTiempoReal').getContext('2d');
+        const chart = new Chart(ctx, {
+            type: 'line',
+            data: {
+                labels: [],
+                datasets: [{
+                    label: 'Intensidad de Sonido (%)',
+                    data: [],
+                    borderColor: '#22d3ee',
+                    backgroundColor: 'rgba(34, 211, 238, 0.1)',
+                    borderWidth: 2,
+                    fill: true,
+                    tension: 0.4
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                scales: {
+                    y: { min: 0, max: 100, grid: { color: '#1e293b' } },
+                    x: { grid: { display: false } }
+                }
+            }
+        });
+
+        let intervaloEnVivo;
+
+        // Función para consultar los datos recientes (Tiempo Real)
+        async function cargarTiempoReal() {
+            document.getElementById('tituloTabla').innerText = "Últimos Registros Guardados";
+            clearInterval(intervaloEnVivo);
+            
+            async function actualizar() {
+                const res = await fetch('/api/historial/reciente');
+                const datos = await res.json();
+                
+                // Actualizar Gráfica
+                chart.data.labels = datos.map(d => d.fecha_hora.split('T')[1].substring(0, 8));
+                chart.data.datasets[0].data = datos.map(d => d.porcentaje);
+                chart.update();
+
+                // Actualizar Tabla
+                const tabla = document.getElementById('tablaCuerpo');
+                tabla.innerHTML = datos.map(d => `
+                    <tr class="border-b border-slate-800 hover:bg-slate-800/30">
+                        <td class="px-4 py-3">${d.fecha_hora.split('T')[1].substring(0, 8)}</td>
+                        <td class="px-4 py-3"><span class="${d.alerta_critica ? 'text-red-400 font-bold' : 'text-slate-300'}">${d.categoria}</span></td>
+                        <td class="px-4 py-3 font-mono">${d.porcentaje}%</td>
+                    </tr>
+                `).join('');
+            }
+            
+            actualizar();
+            intervaloEnVivo = setInterval(actualizar, 4000); // Se actualiza cada 4 segundos solo
+        }
+
+        // Función para aplicar el FILTRO de MongoDB
+        async function filtrarAlertas() {
+            clearInterval(intervaloEnVivo); // Detenemos el tiempo real para mostrar el filtro estático
+            document.getElementById('tituloTabla').innerText = "Historial de Alertas Críticas (Filtro MongoDB)";
+            
+            const res = await fetch('/api/historial/alertas');
+            const datos = await res.json();
+
+            // Actualizar Tabla con el filtro
+            const tabla = document.getElementById('tablaCuerpo');
+            if(datos.length === 0) {
+                tabla.innerHTML = `<tr><td colspan="3" class="text-center py-4 text-slate-500">No hay alertas críticas registradas aún.</td></tr>`;
+                return;
+            }
+
+            tabla.innerHTML = datos.map(d => `
+                <tr class="border-b border-slate-800 bg-red-950/20">
+                    <td class="px-4 py-3">${d.fecha_hora.replace('T', ' ').substring(0, 19)}</td>
+                    <td class="px-4 py-3"><span class="text-red-400 font-bold">${d.categoria}</span></td>
+                    <td class="px-4 py-3 font-mono text-red-300">${d.porcentaje}%</td>
+                </tr>
+            `).join('');
+        }
+
+        // Arrancar en modo tiempo real al cargar la página
+        cargarTiempoReal();
+    </script>
+</body>
+</html>
