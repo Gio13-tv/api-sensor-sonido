@@ -31,15 +31,15 @@ async def recibir_datos(data: SensorData):
     porcentaje = min(int((data.valor_bruto / valor_tope) * 100), 100)
     
     # Clasificación automática en el Backend 
-    if porcentaje < 20:
+    if porcentaje < 10:  # Solo si de verdad es un 0 o casi 0
         categoria = "Silencio"
         alerta = False
-    elif porcentaje < 60:
+    elif porcentaje < 75:  # Todo lo que sea ruido normal o medio caerá aquí
         categoria = "Moderado"
         alerta = False
-    else:
+    else:  # Solo los picos más salvajes de ruido
         categoria = "Ruido Alto"
-        alerta = True # Dispara alerta si el escándalo es fuerte
+        alerta = True
 
     # CORREGIDO: Configura la zona horaria de México para solucionar el desfase de Render
     zona_horaria_mx = pytz.timezone("America/Mexico_City")

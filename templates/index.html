@@ -11,7 +11,7 @@
 
     <div class="max-w-5xl mx-auto space-y-6">
         <header class="flex justify-between items-center border-b border-slate-800 pb-4">
-            <h1 class="text-3xl font-bold tracking-tight text-cyan-400">SONIDOc<span class="text-white">CARE</span></h1>
+            <h1 class="text-3xl font-bold tracking-tight text-cyan-400">SONIDO<span class="text-white">Destector</span></h1>
             <span class="bg-emerald-500/10 text-emerald-400 text-xs font-medium px-2.5 py-0.5 rounded-full border border-emerald-500/20">Sistema Activo</span>
         </header>
 
@@ -128,10 +128,10 @@
             }
 
             tabla.innerHTML = datos.map(d => `
-                <tr class="border-b border-slate-800 bg-red-950/20">
-                    <td class="px-4 py-3">${d.fecha_hora.replace('T', ' ').substring(0, 19)}</td>
-                    <td class="px-4 py-3"><span class="text-red-400 font-bold">${d.categoria}</span></td>
-                    <td class="px-4 py-3 font-mono text-red-300">${d.porcentaje}%</td>
+                <tr class="border-b border-slate-800 hover:bg-slate-800/30">
+                    <td class="px-4 py-3">${d.fecha_hora.split('T')[1].substring(0, 8)}</td>
+                    <td class="px-4 py-3"><span class="${d.alerta_critica ? 'text-red-400 font-bold' : 'text-slate-300'}">${d.categoria}</span></td>
+                    <td class="px-4 py-3 font-mono">${d.porcentaje}% (Nivel: ${d.valor_bruto})</td>
                 </tr>
             `).join('');
         }
