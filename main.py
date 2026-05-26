@@ -32,7 +32,7 @@ async def recibir_datos(data: SensorData):
     
     valor_recibido = data.valor_bruto
     
-    # --- TRUCO DE AMORTIGUACIÓN PARA CAPTAR EL ESTADO "MODERADO" ---
+    # Lógica de amortiguación para generar variaciones intermedias
     if valor_recibido > 2000:
         ultimo_ruido = valor_recibido
     else:
@@ -42,11 +42,9 @@ async def recibir_datos(data: SensorData):
                 ultimo_ruido = 0
         valor_recibido = max(valor_recibido, ultimo_ruido)
 
-    # Escalado basado en tu tope de 700 para sacar el porcentaje
     valor_tope = 700
     porcentaje = min(int((valor_recibido / valor_tope) * 100), 100)
     
-    # --- CLASIFICACIÓN DE CATEGORÍAS ---
     if porcentaje < 15:
         categoria = "Silencio"
         alerta = False
@@ -57,24 +55,21 @@ async def recibir_datos(data: SensorData):
         categoria = "Ruido Alto"
         alerta = True
 
-    # --- CONFIGURACIÓN DE HORA EN FORMATO 12 HORAS (MÉXICO) ---
+    # Obtener hora exacta de México y formatearla a 12 horas
     zona_horaria_mx = pytz.timezone("America/Mexico_City")
     ahora_mx = datetime.now(zona_horaria_mx)
     
-    # Esto guardará un string limpio como "07:26:04 PM"
+    # Esto guardará en tu clúster un string limpio como "07:31:05 PM"
     hora_12h = ahora_mx.strftime("%I:%M:%S %p")
-    
-    # Para mantener el número de la hora exacto (útil si haces gráficas por hora después)
-    # Convertimos la hora al formato de 12h numérico (de 1 a 12)
-    hora_exacta_12h = int(ahora_mx.strftime("%I"))
+    hora_exacta_num = int(ahora_mx.strftime("%I"))
 
     documento = {
         "valor_bruto": valor_recibido,
         "porcentaje": porcentaje,
         "categoria": categoria,
         "alerta_critica": alerta,
-        "fecha_hora": hora_12h,           # <--- Cambiado a string de 12 horas (Ej: "07:19:38 PM")
-        "hora_exacta": hora_exacta_12h,   # <--- Guardará del 1 al 12 en vez de 0 a 23
+        "fecha_hora": hora_12h,  # <--- Así es como se verá reflejado en tu Data Explorer de Atlas
+        "hora_exacta": hora_exacta_num,
         "dia_semana": ahora_mx.strftime("%A")
     }
     
