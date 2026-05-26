@@ -7,11 +7,11 @@
     <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 </head>
-<body class="bg-slate-950 text-slate-100 min-height-screen font-sans p-6">
+<body class="bg-slate-950 text-slate-100 min-h-screen font-sans p-6">
 
     <div class="max-w-5xl mx-auto space-y-6">
         <header class="flex justify-between items-center border-b border-slate-800 pb-4">
-            <h1 class="text-3xl font-bold tracking-tight text-cyan-400">SONIDO<span class="text-white">Destector</span></h1>
+            <h1 class="text-3xl font-bold tracking-tight text-cyan-400">SONIDO<span class="text-white">Care</span></h1>
             <span class="bg-emerald-500/10 text-emerald-400 text-xs font-medium px-2.5 py-0.5 rounded-full border border-emerald-500/20">Sistema Activo</span>
         </header>
 
@@ -27,10 +27,10 @@
                 <h3 class="text-lg font-medium text-slate-200">Consultas de Base de Datos</h3>
                 <p class="text-sm text-slate-400">Ejecuta filtros directamente sobre tu clúster de MongoDB Atlas.</p>
                 
-                <button onclick="cargarTiempoReal()" class="w-full bg-cyan-600 hover:bg-cyan-500 text-white font-medium py-2 px-4 rounded-lg transition">
+                <button onclick="cargarTiempoReal()" class="w-full bg-cyan-600 hover:bg-cyan-500 text-white font-medium py-2 px-4 rounded-lg transition cursor-pointer">
                     Ver Flujo En Vivo
                 </button>
-                <button onclick="filtrarAlertas()" class="w-full bg-red-950 hover:bg-red-900 text-red-200 font-medium py-2 px-4 rounded-lg border border-red-800/50 transition">
+                <button onclick="filtrarAlertas()" class="w-full bg-red-950 hover:bg-red-900 text-red-200 font-medium py-2 px-4 rounded-lg border border-red-800/50 transition cursor-pointer">
                     Filtrar Alertas Críticas
                 </button>
             </div>
@@ -43,7 +43,7 @@
                             <tr>
                                 <th class="px-4 py-3">Hora</th>
                                 <th class="px-4 py-3">Categoría</th>
-                                <th class="px-4 py-3">Porcentaje</th>
+                                <th class="px-4 py-3">Porcentaje (Valor Bruto)</th>
                             </tr>
                         </thead>
                         <tbody id="tablaCuerpo">
@@ -55,7 +55,7 @@
     </div>
 
     <script>
-        // Configuración Inicial de la Gráfica
+        // Configuración Inicial de la Gráfica Chart.js
         const ctx = document.getElementById('graficaTiempoReal').getContext('2d');
         const chart = new Chart(ctx, {
             type: 'line',
@@ -97,30 +97,29 @@
                 chart.data.datasets[0].data = datos.map(d => d.porcentaje);
                 chart.update();
 
-                // Actualizar Tabla
+                // Actualizar Tabla (CORREGIDO: Ahora muestra el valor bruto en vivo también)
                 const tabla = document.getElementById('tablaCuerpo');
                 tabla.innerHTML = datos.map(d => `
                     <tr class="border-b border-slate-800 hover:bg-slate-800/30">
                         <td class="px-4 py-3">${d.fecha_hora.split('T')[1].substring(0, 8)}</td>
                         <td class="px-4 py-3"><span class="${d.alerta_critica ? 'text-red-400 font-bold' : 'text-slate-300'}">${d.categoria}</span></td>
-                        <td class="px-4 py-3 font-mono">${d.porcentaje}%</td>
+                        <td class="px-4 py-3 font-mono">${d.porcentaje}% (Nivel: ${d.valor_bruto})</td>
                     </tr>
                 `).join('');
             }
             
             actualizar();
-            intervaloEnVivo = setInterval(actualizar, 4000); // Se actualiza cada 4 segundos solo
+            intervaloEnVivo = setInterval(actualizar, 4000); // Actualización cada 4 segundos
         }
 
-        // Función para aplicar el FILTRO de MongoDB
+        // Función para aplicar el FILTRO de MongoDB (Alertas Críticas)
         async function filtrarAlertas() {
-            clearInterval(intervaloEnVivo); // Detenemos el tiempo real para mostrar el filtro estático
+            clearInterval(intervaloEnVivo); // Frena el bucle de tiempo real para evitar parpadeos
             document.getElementById('tituloTabla').innerText = "Historial de Alertas Críticas (Filtro MongoDB)";
             
             const res = await fetch('/api/historial/alertas');
             const datos = await res.json();
 
-            // Actualizar Tabla con el filtro
             const tabla = document.getElementById('tablaCuerpo');
             if(datos.length === 0) {
                 tabla.innerHTML = `<tr><td colspan="3" class="text-center py-4 text-slate-500">No hay alertas críticas registradas aún.</td></tr>`;
@@ -136,7 +135,7 @@
             `).join('');
         }
 
-        // Arrancar en modo tiempo real al cargar la página
+        // Inicializar de inmediato en tiempo real al abrir la página
         cargarTiempoReal();
     </script>
 </body>
