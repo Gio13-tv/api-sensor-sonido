@@ -93,7 +93,7 @@
                 const datos = await res.json();
                 
                 // Actualizar Gráfica
-                chart.data.labels = datos.map(d => d.fecha_hora.split('T')[1].substring(0, 8));
+                chart.data.labels = datos.map(d => d.fecha_hora); // Usa la cadena directa de 12h
                 chart.data.datasets[0].data = datos.map(d => d.porcentaje);
                 chart.update();
 
@@ -101,7 +101,7 @@
                 const tabla = document.getElementById('tablaCuerpo');
                 tabla.innerHTML = datos.map(d => `
                     <tr class="border-b border-slate-800 hover:bg-slate-800/30">
-                        <td class="px-4 py-3">${d.fecha_hora.split('T')[1].substring(0, 8)}</td>
+                        <td class="px-4 py-3">${d.fecha_hora}</td> // Inyecta directo el tiempo formateado
                         <td class="px-4 py-3"><span class="${d.alerta_critica ? 'text-red-400 font-bold' : 'text-slate-300'}">${d.categoria}</span></td>
                         <td class="px-4 py-3 font-mono">${d.porcentaje}% (Nivel: ${d.valor_bruto})</td>
                     </tr>

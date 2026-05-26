@@ -24,6 +24,7 @@ coleccion = db["registrossonido"]
 class SensorData(BaseModel):
     valor_bruto: int
 
+ultimo_ruido = 0
 # 1. ENDPOINT PARA RECIBIR DATOS DEL ESP32
 @app.post("/api/datos")
 async def recibir_datos(data: SensorData):
@@ -31,14 +32,12 @@ async def recibir_datos(data: SensorData):
     
     valor_recibido = data.valor_bruto
     
-    # --- TRUCO DE AMORTIGUACIÓN PARA FORZAR EL ESTADO "MODERADO" ---
+    # --- TRUCO DE AMORTIGUACIÓN PARA CAPTAR EL ESTADO "MODERADO" ---
     if valor_recibido > 2000:
-        # Si el ESP32 detecta un ruido fuerte (4095), lo guardamos a tope
         ultimo_ruido = valor_recibido
     else:
-        # Si el sensor manda 0, pero venimos de un ruido fuerte, bajamos el valor poco a poco
         if ultimo_ruido > 0:
-            ultimo_ruido = int(ultimo_ruido * 0.45) # Reduce el impacto al 45% en cada ciclo
+            ultimo_ruido = int(ultimo_ruido * 0.45)
             if ultimo_ruido < 100:
                 ultimo_ruido = 0
         valor_recibido = max(valor_recibido, ultimo_ruido)
@@ -52,24 +51,31 @@ async def recibir_datos(data: SensorData):
         categoria = "Silencio"
         alerta = False
     elif porcentaje < 75:
-        categoria = "Moderado"  # <-- ¡Ahora caerán registros aquí durante la bajada del sonido!
+        categoria = "Moderado"
         alerta = False
     else:
         categoria = "Ruido Alto"
         alerta = True
 
-    # --- CORRECCIÓN DE HORA (Formato ISO de 24 horas estricto) ---
+    # --- CONFIGURACIÓN DE HORA EN FORMATO 12 HORAS (MÉXICO) ---
     zona_horaria_mx = pytz.timezone("America/Mexico_City")
-    ahora = datetime.now(zona_horaria_mx)
+    ahora_mx = datetime.now(zona_horaria_mx)
+    
+    # Esto guardará un string limpio como "07:26:04 PM"
+    hora_12h = ahora_mx.strftime("%I:%M:%S %p")
+    
+    # Para mantener el número de la hora exacto (útil si haces gráficas por hora después)
+    # Convertimos la hora al formato de 12h numérico (de 1 a 12)
+    hora_exacta_12h = int(ahora_mx.strftime("%I"))
 
     documento = {
         "valor_bruto": valor_recibido,
         "porcentaje": porcentaje,
         "categoria": categoria,
         "alerta_critica": alerta,
-        "fecha_hora": ahora.isoformat(),  # Guarda el string ISO completo con la hora local real
-        "hora_exacta": ahora.hour,        # Guardará el número en formato 24h (ej: 19)
-        "dia_semana": ahora.strftime("%A")
+        "fecha_hora": hora_12h,           # <--- Cambiado a string de 12 horas (Ej: "07:19:38 PM")
+        "hora_exacta": hora_exacta_12h,   # <--- Guardará del 1 al 12 en vez de 0 a 23
+        "dia_semana": ahora_mx.strftime("%A")
     }
     
     resultado = coleccion.insert_one(documento)
