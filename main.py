@@ -30,22 +30,30 @@ ultimo_ruido = 0
 async def recibir_datos(data: SensorData):
     global ultimo_ruido
     
-    valor_recibido = data.valor_bruto
+    # Capturamos lo que manda el ESP32 en este instante
+    ruido_actual = data.valor_bruto
     
-    # --- LÓGICA DE AMORTIGUACIÓN PARA CAPTAR EL ESTADO MODERADO ---
-    if valor_recibido > 2000:
-        ultimo_ruido = valor_recibido
+    # 1. Si el sensor detecta un golpe fuerte, actualizamos el tope de memoria
+    if ruido_actual > 2000:
+        ultimo_ruido = ruido_actual
+        valor_a_procesar = ruido_actual
     else:
+        # 2. Si el sensor manda 0 (silencio), pero tenemos un ruido fuerte en memoria, lo amortiguamos
         if ultimo_ruido > 0:
-            ultimo_ruido = int(ultimo_ruido * 0.45)  # Reduce el impacto gradualmente
+            ultimo_ruido = int(ultimo_ruido * 0.40)  # Baja al 40% en cada ciclo
+            
+            # Si el eco ya es muy bajito, lo rompemos para que regrese a silencio absoluto
             if ultimo_ruido < 100:
                 ultimo_ruido = 0
-        valor_recibido = max(valor_recibido, ultimo_ruido)
+                
+        # El valor final será la amortiguación calculada (o 0 si ya se extinguió)
+        valor_a_procesar = ultimo_ruido
 
+    # Escalado para sacar el porcentaje en base a tu tope de 700
     valor_tope = 700
-    porcentaje = min(int((valor_recibido / valor_tope) * 100), 100)
+    porcentaje = min(int((valor_a_procesar / valor_tope) * 100), 100)
     
-    # --- CLASIFICACIÓN DE CATEGORÍAS ---
+    # --- CLASIFICACIÓN CORREGIDA DE CATEGORÍAS ---
     if porcentaje < 15:
         categoria = "Silencio"
         alerta = False
@@ -56,22 +64,19 @@ async def recibir_datos(data: SensorData):
         categoria = "Ruido Alto"
         alerta = True
 
-    # --- FORMATO DE HORA AMIGABLE DE 12 HORAS PARA MONGODB ---
+    # --- FORMATO DE 12 HORAS PERFECTO PARA EL CLÚSTER MONGODB ---
     zona_horaria_mx = pytz.timezone("America/Mexico_City")
     ahora_mx = datetime.now(zona_horaria_mx)
     
-    # Esto guardará textualmente "07:31:05 PM" en tu base de datos de Atlas
-    hora_12h = ahora_mx.strftime("%I:%M:%S %p")
-    
-    # Extrae el número entero de la hora en formato 12h (de 1 a 12)
+    hora_12h = ahora_mx.strftime("%I:%M:%S %p")  # Ejemplo: "07:47:15 PM"
     hora_exacta_num = int(ahora_mx.strftime("%I"))
 
     documento = {
-        "valor_bruto": valor_recibido,
+        "valor_bruto": valor_a_procesar,
         "porcentaje": porcentaje,
         "categoria": categoria,
         "alerta_critica": alerta,
-        "fecha_hora": hora_12h,  # <--- Esto es lo que verás directo en el Data Explorer de Atlas
+        "fecha_hora": hora_12h,  # Esto se reflejará idéntico en tu MongoDB Atlas
         "hora_exacta": hora_exacta_num,
         "dia_semana": ahora_mx.strftime("%A")
     }
