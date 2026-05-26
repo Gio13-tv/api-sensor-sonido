@@ -32,12 +32,12 @@ async def recibir_datos(data: SensorData):
     
     valor_recibido = data.valor_bruto
     
-    # Lógica de amortiguación para generar variaciones intermedias
+    # --- LÓGICA DE AMORTIGUACIÓN PARA CAPTAR EL ESTADO MODERADO ---
     if valor_recibido > 2000:
         ultimo_ruido = valor_recibido
     else:
         if ultimo_ruido > 0:
-            ultimo_ruido = int(ultimo_ruido * 0.45)
+            ultimo_ruido = int(ultimo_ruido * 0.45)  # Reduce el impacto gradualmente
             if ultimo_ruido < 100:
                 ultimo_ruido = 0
         valor_recibido = max(valor_recibido, ultimo_ruido)
@@ -45,6 +45,7 @@ async def recibir_datos(data: SensorData):
     valor_tope = 700
     porcentaje = min(int((valor_recibido / valor_tope) * 100), 100)
     
+    # --- CLASIFICACIÓN DE CATEGORÍAS ---
     if porcentaje < 15:
         categoria = "Silencio"
         alerta = False
@@ -55,12 +56,14 @@ async def recibir_datos(data: SensorData):
         categoria = "Ruido Alto"
         alerta = True
 
-    # Obtener hora exacta de México y formatearla a 12 horas
+    # --- FORMATO DE HORA AMIGABLE DE 12 HORAS PARA MONGODB ---
     zona_horaria_mx = pytz.timezone("America/Mexico_City")
     ahora_mx = datetime.now(zona_horaria_mx)
     
-    # Esto guardará en tu clúster un string limpio como "07:31:05 PM"
+    # Esto guardará textualmente "07:31:05 PM" en tu base de datos de Atlas
     hora_12h = ahora_mx.strftime("%I:%M:%S %p")
+    
+    # Extrae el número entero de la hora en formato 12h (de 1 a 12)
     hora_exacta_num = int(ahora_mx.strftime("%I"))
 
     documento = {
@@ -68,7 +71,7 @@ async def recibir_datos(data: SensorData):
         "porcentaje": porcentaje,
         "categoria": categoria,
         "alerta_critica": alerta,
-        "fecha_hora": hora_12h,  # <--- Así es como se verá reflejado en tu Data Explorer de Atlas
+        "fecha_hora": hora_12h,  # <--- Esto es lo que verás directo en el Data Explorer de Atlas
         "hora_exacta": hora_exacta_num,
         "dia_semana": ahora_mx.strftime("%A")
     }

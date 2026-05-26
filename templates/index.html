@@ -93,7 +93,7 @@
                 const datos = await res.json();
                 
                 // Actualizar Gráfica
-                chart.data.labels = datos.map(d => d.fecha_hora); // Usa la cadena directa de 12h
+                chart.data.labels = datos.map(d => d.fecha_hora);
                 chart.data.datasets[0].data = datos.map(d => d.porcentaje);
                 chart.update();
 
