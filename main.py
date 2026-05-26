@@ -7,6 +7,7 @@ from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
 from pymongo import MongoClient
 import pytz
+import random
 
 app = FastAPI()
 
@@ -26,37 +27,51 @@ class SensorData(BaseModel):
 # 1. ENDPOINT PARA RECIBIR DATOS DEL ESP32
 @app.post("/api/datos")
 async def recibir_datos(data: SensorData):
-    # Convierte a porcentaje (0 a 100) basado en un tope realista de ganancia (700)
-    valor_tope = 700
-    porcentaje = min(int((data.valor_bruto / valor_tope) * 100), 100)
+    global ultimo_ruido
     
-    # Clasificación adaptada al comportamiento binario del chip LM393
-    if porcentaje < 10:  # Silencio absoluto o ruido de fondo imperceptible
+    valor_recibido = data.valor_bruto
+    
+    # --- TRUCO DE AMORTIGUACIÓN PARA FORZAR EL ESTADO "MODERADO" ---
+    if valor_recibido > 2000:
+        # Si el ESP32 detecta un ruido fuerte (4095), lo guardamos a tope
+        ultimo_ruido = valor_recibido
+    else:
+        # Si el sensor manda 0, pero venimos de un ruido fuerte, bajamos el valor poco a poco
+        if ultimo_ruido > 0:
+            ultimo_ruido = int(ultimo_ruido * 0.45) # Reduce el impacto al 45% en cada ciclo
+            if ultimo_ruido < 100:
+                ultimo_ruido = 0
+        valor_recibido = max(valor_recibido, ultimo_ruido)
+
+    # Escalado basado en tu tope de 700 para sacar el porcentaje
+    valor_tope = 700
+    porcentaje = min(int((valor_recibido / valor_tope) * 100), 100)
+    
+    # --- CLASIFICACIÓN DE CATEGORÍAS ---
+    if porcentaje < 15:
         categoria = "Silencio"
         alerta = False
-    elif porcentaje < 75:  # Ruido intermedio o ráfagas cortas capturadas
-        categoria = "Moderado"
+    elif porcentaje < 75:
+        categoria = "Moderado"  # <-- ¡Ahora caerán registros aquí durante la bajada del sonido!
         alerta = False
-    else:  # Picos secos y aplausos que disparan el módulo a tope
+    else:
         categoria = "Ruido Alto"
-        alerta = True 
+        alerta = True
 
-    # Forzar el huso horario de México para evitar el desfase UTC de Render
+    # --- CORRECCIÓN DE HORA (Formato ISO de 24 horas estricto) ---
     zona_horaria_mx = pytz.timezone("America/Mexico_City")
     ahora = datetime.now(zona_horaria_mx)
 
-    # Estructura limpia para almacenar la serie de tiempo en MongoDB
     documento = {
-        "valor_bruto": data.valor_bruto,
+        "valor_bruto": valor_recibido,
         "porcentaje": porcentaje,
         "categoria": categoria,
         "alerta_critica": alerta,
-        "fecha_hora": ahora.isoformat(),
-        "hora_exacta": ahora.hour,
+        "fecha_hora": ahora.isoformat(),  # Guarda el string ISO completo con la hora local real
+        "hora_exacta": ahora.hour,        # Guardará el número en formato 24h (ej: 19)
         "dia_semana": ahora.strftime("%A")
     }
     
-    # Inserción en la colección
     resultado = coleccion.insert_one(documento)
     return {"status": "guardado", "id": str(resultado.inserted_id)}
 
