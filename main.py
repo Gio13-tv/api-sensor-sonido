@@ -6,46 +6,46 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
 from pymongo import MongoClient
-import pytz  # <-- CORREGIDO: Importación limpia en su propia línea
+import pytz
 
 app = FastAPI()
 
-# plantillas HTML
+# Configuración de plantillas HTML
 templates = Jinja2Templates(directory="templates")
 
-# Conexión a MongoDB Atlas 
+# Conexión segura a MongoDB Atlas 
 MONGO_URI = os.getenv("MONGO_URI", "mongodb+srv://esp32:paTos123@cluster0.0wdqvuo.mongodb.net/?appName=Cluster0")
 client = MongoClient(MONGO_URI)
 db = client["proy"]
 coleccion = db["registrossonido"]
 
-# Modelo de datos del ESP32
+# Modelo de datos para validar lo que manda el ESP32
 class SensorData(BaseModel):
     valor_bruto: int
 
-# ENDPOINT PARA RECIBIR DATOS DEL ESP32
+# 1. ENDPOINT PARA RECIBIR DATOS DEL ESP32
 @app.post("/api/datos")
 async def recibir_datos(data: SensorData):
-    # Convierte a porcentaje aproximado (0 a 100) basado en el rango del ESP32 (0-4095)
+    # Convierte a porcentaje (0 a 100) basado en un tope realista de ganancia (700)
     valor_tope = 700
     porcentaje = min(int((data.valor_bruto / valor_tope) * 100), 100)
     
-    # Clasificación automática en el Backend 
-    if porcentaje < 10:  # Solo si de verdad es un 0 o casi 0
+    # Clasificación adaptada al comportamiento binario del chip LM393
+    if porcentaje < 10:  # Silencio absoluto o ruido de fondo imperceptible
         categoria = "Silencio"
         alerta = False
-    elif porcentaje < 75:  # Todo lo que sea ruido normal o medio caerá aquí
+    elif porcentaje < 75:  # Ruido intermedio o ráfagas cortas capturadas
         categoria = "Moderado"
         alerta = False
-    else:  # Solo los picos más salvajes de ruido
+    else:  # Picos secos y aplausos que disparan el módulo a tope
         categoria = "Ruido Alto"
-        alerta = True
+        alerta = True 
 
-    # CORREGIDO: Configura la zona horaria de México para solucionar el desfase de Render
+    # Forzar el huso horario de México para evitar el desfase UTC de Render
     zona_horaria_mx = pytz.timezone("America/Mexico_City")
     ahora = datetime.now(zona_horaria_mx)
 
-    # Estructura del documento para MongoDB
+    # Estructura limpia para almacenar la serie de tiempo en MongoDB
     documento = {
         "valor_bruto": data.valor_bruto,
         "porcentaje": porcentaje,
@@ -56,26 +56,26 @@ async def recibir_datos(data: SensorData):
         "dia_semana": ahora.strftime("%A")
     }
     
-    # Insertar en MongoDB Atlas
+    # Inserción en la colección
     resultado = coleccion.insert_one(documento)
     return {"status": "guardado", "id": str(resultado.inserted_id)}
 
-# ENDPOINT PARA TRAER LOS ÚLTIMOS DATOS (Para la gráfica en tiempo real)
+# 2. ENDPOINT PARA LA GRÁFICA EN TIEMPO REAL (Últimos 20 registros)
 @app.get("/api/historial/reciente")
 async def obtener_recientes():
-    # Trae los últimos 20 registros ordenados del más viejo al más nuevo para la gráfica
+    # Trae los registros más nuevos de la base de datos
     cursor = coleccion.find({}, {"_id": 0}).sort("_id", -1).limit(20)
     registros = list(cursor)
-    return registros[::-1] # Invierte el tiempo para que el tiempo corra de izquierda a derecha
+    # Se invierte el orden para que en Chart.js el tiempo corra de izquierda a derecha
+    return registros[::-1] 
 
-# ENDPOINT PARA FILTRADO AVANZADO 
+# 3. ENDPOINT PARA FILTRADO DE LOGS (Solo alertas críticas)
 @app.get("/api/historial/alertas")
 async def obtener_alertas():
-    # Trae solo donde hubo ruido crítico
     cursor = coleccion.find({"alerta_critica": True}, {"_id": 0}).sort("_id", -1).limit(50)
     return list(cursor)
 
-# RUTA PARA MOSTRAR LA PÁGINA WEB
+# 4. ENRUTAMIENTO PRINCIPAL DE LA INTERFAZ WEB
 @app.get("/", response_class=HTMLResponse)
 async def leer_interfaz(request: Request):
     return templates.TemplateResponse("index.html", {"request": request})
