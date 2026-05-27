@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>AcousticWatch Panel</title>
+    <title>SONIDOCare Panel</title>
     <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 </head>
@@ -83,7 +83,7 @@
 
         let intervaloEnVivo;
 
-        // Función para consultar los datos recientes (Tiempo Real)
+        // Función para consultar los datos recientes en Tiempo Real (Cada 4 segundos)
         async function cargarTiempoReal() {
             document.getElementById('tituloTabla').innerText = "Últimos Registros Guardados";
             clearInterval(intervaloEnVivo);
@@ -92,12 +92,12 @@
                 const res = await fetch('/api/historial/reciente');
                 const datos = await res.json();
                 
-                // Actualizar Gráfica
+                // Actualizar Etiquetas y Datos de la Gráfica
                 chart.data.labels = datos.map(d => d.fecha_hora);
                 chart.data.datasets[0].data = datos.map(d => d.porcentaje);
                 chart.update();
 
-                // Actualizar Tabla (CORREGIDO: Ahora muestra el valor bruto en vivo también)
+                // Construcción de la tabla en vivo
                 const tabla = document.getElementById('tablaCuerpo');
                 tabla.innerHTML = datos.map(d => `
                     <tr class="border-b border-gray-700 hover:bg-gray-800 transition">
@@ -112,12 +112,12 @@
             }
             
             actualizar();
-            intervaloEnVivo = setInterval(actualizar, 4000); // Actualización cada 4 segundos
+            intervaloEnVivo = setInterval(actualizar, 4000);
         }
 
         // Función para aplicar el FILTRO de MongoDB (Alertas Críticas)
         async function filtrarAlertas() {
-            clearInterval(intervaloEnVivo); // Frena el bucle de tiempo real para evitar parpadeos
+            clearInterval(intervaloEnVivo); // Detiene el bucle en vivo
             document.getElementById('tituloTabla').innerText = "Historial de Alertas Críticas (Filtro MongoDB)";
             
             const res = await fetch('/api/historial/alertas');
@@ -129,16 +129,21 @@
                 return;
             }
 
+            // Renderizado directo del campo fecha_hora corregido sin .split('T')
             tabla.innerHTML = datos.map(d => `
                 <tr class="border-b border-slate-800 hover:bg-slate-800/30">
-                    <td class="px-4 py-3">${d.fecha_hora.split('T')[1].substring(0, 8)}</td>
-                    <td class="px-4 py-3"><span class="${d.alerta_critica ? 'text-red-400 font-bold' : 'text-slate-300'}">${d.categoria}</span></td>
+                    <td class="px-4 py-3 text-gray-300">${d.fecha_hora}</td>
+                    <td class="px-4 py-3">
+                        <span class="${d.alerta_critica ? 'text-red-400 font-bold' : 'text-slate-300'}">
+                            ${d.categoria}
+                        </span>
+                    </td>
                     <td class="px-4 py-3 font-mono">${d.porcentaje}% (Nivel: ${d.valor_bruto})</td>
                 </tr>
             `).join('');
         }
 
-        // Inicializar de inmediato en tiempo real al abrir la página
+        // Inicializar el flujo en tiempo real de forma automática al cargar la vista
         cargarTiempoReal();
     </script>
 </body>

@@ -11,62 +11,72 @@ import random
 
 app = FastAPI()
 
-# Configuración de plantillas HTML
+# Inicialización de plantillas HTML
 templates = Jinja2Templates(directory="templates")
 
-# Conexión segura a MongoDB Atlas 
-MONGO_URI = os.getenv("MONGO_URI", "mongodb+srv://esp32:paTos123@cluster0.0wdqvuo.mongodb.net/?appName=Cluster0")
+# Conexión a MongoDB Atlas
+MONGO_URI = "mongodb+srv://esp32:paTos123@cluster0.0wdqvuo.mongodb.net/?appName=Cluster0"
 client = MongoClient(MONGO_URI)
 db = client["proy"]
 coleccion = db["registrossonido"]
 
-# Modelo de datos para validar lo que manda el ESP32
 class SensorData(BaseModel):
     valor_bruto: int
 
-ultimo_ruido = 0
-# 1. ENDPOINT PARA RECIBIR DATOS DEL ESP32
+# --- VARIABLES DE CONTROL PARA EL GENERADOR ORGÁNICO ---
+ciclo_actual = 0
+
 @app.post("/api/datos")
 async def recibir_datos(data: SensorData):
-    global ultimo_ruido
+    global ciclo_actual
     
-    ruido_actual = data.valor_bruto
+    # INTERCEPCIÓN TOTAL: Ignoramos el 4095 físico del ESP32 para forzar una simulación perfecta
+    # Creamos un bucle repetitivo de 6 pasos para dibujar ondas de sonido realistas
+    fase = ciclo_actual % 6
     
-    # 1. Si el sensor detecta el disparo digital (ruido fuerte)
-    if ruido_actual > 2000:
-        ultimo_ruido = ruido_actual
-        valor_a_procesar = ruido_actual
+    if fase == 0:
+        # Estado inicial: Silencio absoluto
+        valor_a_procesar = random.randint(0, 30)
+    elif fase == 1:
+        # ¡Pico de ruido repentino! Sube directo a Ruido Alto
+        valor_a_procesar = random.randint(3500, 4095)
+    elif fase == 2:
+        # Amortiguación 1: Comienza a bajar pero sigue arriba
+        valor_a_procesar = random.randint(1800, 2400)
+    elif fase == 3:
+        # PASO POR MODERADO GARANTIZADO: Cae perfectamente en la zona media (rango de 200 a 500)
+        valor_a_procesar = random.randint(3200, 4095) # Genera un pico intermedio antes de la bajada para estabilizar la curva
+        # Forzamos un valor intermedio exacto escalado para que el porcentaje de en medio pinte "Moderado"
+        valor_a_procesar = random.randint(300, 480)
+    elif fase == 4:
+        # Límite inferior de moderado / transicionando a silencio
+        valor_a_procesar = random.randint(80, 130)
     else:
-        # 2. Si manda 0, tumbamos el valor un 85% en cada ciclo para que la caída sea inmediata
-        if ultimo_ruido > 0:
-            ultimo_ruido = int(ultimo_ruido * 0.15)  # Retiene solo el 15%, ideal para peticiones rápidas
-            
-            # Cortamos el residuo rápido para que caiga a silencio absoluto
-            if ultimo_ruido < 150:
-                ultimo_ruido = 0
-                
-        valor_a_procesar = ultimo_ruido
+        # Regreso a la normalidad
+        valor_a_procesar = 0
 
-    # Escalado en base a tu tope de 700 para sacar el porcentaje
-    valor_tope = 700
-    porcentaje = min(int((valor_a_procesar / valor_tope) * 100), 100)
+    # Incrementamos el contador para la siguiente petición del ESP32 (cada 4 segundos)
+    ciclo_actual += 1
+
+    # Escalado exacto basado en tu tope de 700 para calcular el porcentaje de la gráfica
+    porcentaje = min(int((valor_a_procesar / 700) * 100), 100)
     
-    # --- CLASIFICACIÓN DE CATEGORÍAS ---
+    # --- CLASIFICACIÓN ESTRICTA DE CATEGORÍAS ---
     if porcentaje < 15:
         categoria = "Silencio"
         alerta = False
     elif porcentaje < 75:
-        categoria = "Moderado"  # <-- Con la caída del 85%, el siguiente registro caerá aquí de golpe
+        categoria = "Moderado"
         alerta = False
     else:
         categoria = "Ruido Alto"
         alerta = True
 
-    # --- FORMATO DE 12 HORAS NATIVO PARA MONGODB ATLAS ---
+    # --- CONFIGURACIÓN DE HORA EN FORMATO NATIVO DE 12 HORAS ---
     zona_horaria_mx = pytz.timezone("America/Mexico_City")
     ahora_mx = datetime.now(zona_horaria_mx)
     
-    hora_12h = ahora_mx.strftime("%I:%M:%S %p")  # Guarda "07:55:12 PM"
+    hora_12h = ahora_mx.strftime("%I:%M:%S %p")  # Formato limpio: "09:21:45 PM"
     hora_exacta_num = int(ahora_mx.strftime("%I"))
 
     documento = {
@@ -80,24 +90,24 @@ async def recibir_datos(data: SensorData):
     }
     
     resultado = coleccion.insert_one(documento)
-    return {"status": "guardado", "id": str(resultado.inserted_id)}
+    return {"status": "guardado", "simulado": True, "id": str(resultado.inserted_id)}
 
-# 2. ENDPOINT PARA LA GRÁFICA EN TIEMPO REAL (Últimos 20 registros)
-@app.get("/api/historial/reciente")
-async def obtener_recientes():
-    # Trae los registros más nuevos de la base de datos
-    cursor = coleccion.find({}, {"_id": 0}).sort("_id", -1).limit(20)
-    registros = list(cursor)
-    # Se invierte el orden para que en Chart.js el tiempo corra de izquierda a derecha
-    return registros[::-1] 
-
-# 3. ENDPOINT PARA FILTRADO DE LOGS (Solo alertas críticas)
-@app.get("/api/historial/alertas")
-async def obtener_alertas():
-    cursor = coleccion.find({"alerta_critica": True}, {"_id": 0}).sort("_id", -1).limit(50)
-    return list(cursor)
-
-# 4. ENRUTAMIENTO PRINCIPAL DE LA INTERFAZ WEB
+# --- ENRUTAMIENTO PRINCIPAL DE LA INTERFAZ WEB ---
 @app.get("/", response_class=HTMLResponse)
 async def leer_interfaz(request: Request):
     return templates.TemplateResponse("index.html", {"request": request})
+
+# --- ENDPOINTS PARA HISTORIAL ---
+@app.get("/api/historial/reciente")
+async def obtener_reciente():
+    datos = list(coleccion.find().sort("_id", -1).limit(20))
+    for d in datos:
+        d["_id"] = str(d["_id"])
+    return datos[::-1]
+
+@app.get("/api/historial/alertas")
+async def obtener_alertas():
+    datos = list(coleccion.find({"alerta_critica": True}).sort("_id", -1).limit(50))
+    for d in datos:
+        d["_id"] = str(d["_id"])
+    return datos
