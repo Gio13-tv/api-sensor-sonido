@@ -12,11 +12,11 @@
     <div class="max-w-5xl mx-auto space-y-6">
         <header class="flex justify-between items-center border-b border-slate-800 pb-4">
             <h1 class="text-3xl font-bold tracking-tight text-cyan-400">SONIDO<span class="text-white">Care</span></h1>
-            <span class="bg-emerald-500/10 text-emerald-400 text-xs font-medium px-2.5 py-0.5 rounded-full border border-emerald-500/20">Sistema Activo</span>
+            <span class="bg-emerald-500/10 text-emerald-400 text-xs font-medium px-2.5 py-0.5 rounded-full border border-emerald-500/20">Telemetría de Hardware Activa</span>
         </header>
 
         <div class="bg-slate-900 border border-slate-800 rounded-xl p-6 shadow-xl">
-            <h2 class="text-xl font-semibold mb-4 text-slate-300">Monitoreo de Ruido en Vivo</h2>
+            <h2 class="text-xl font-semibold mb-4 text-slate-300">Monitoreo de Ruido Físico en Vivo</h2>
             <div class="h-64">
                 <canvas id="graficaTiempoReal"></canvas>
             </div>
@@ -25,7 +25,7 @@
         <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
             <div class="md:col-span-1 bg-slate-900 border border-slate-800 rounded-xl p-6 flex flex-col gap-4">
                 <h3 class="text-lg font-medium text-slate-200">Consultas de Base de Datos</h3>
-                <p class="text-sm text-slate-400">Ejecuta filtros directamente sobre tu clúster de MongoDB Atlas.</p>
+                <p class="text-sm text-slate-400">Filtros de alta velocidad directo sobre MongoDB Atlas.</p>
                 
                 <button onclick="cargarTiempoReal()" class="w-full bg-cyan-600 hover:bg-cyan-500 text-white font-medium py-2 px-4 rounded-lg transition cursor-pointer">
                     Ver Flujo En Vivo
@@ -55,25 +55,25 @@
     </div>
 
     <script>
-        // Configuración Inicial de la Gráfica Chart.js
         const ctx = document.getElementById('graficaTiempoReal').getContext('2d');
         const chart = new Chart(ctx, {
             type: 'line',
             data: {
                 labels: [],
                 datasets: [{
-                    label: 'Intensidad de Sonido (%)',
+                    label: 'Intensidad Real (%)',
                     data: [],
                     borderColor: '#22d3ee',
-                    backgroundColor: 'rgba(34, 211, 238, 0.1)',
+                    backgroundColor: 'rgba(34, 211, 238, 0.05)',
                     borderWidth: 2,
                     fill: true,
-                    tension: 0.4
+                    tension: 0.35
                 }]
             },
             options: {
                 responsive: true,
                 maintainAspectRatio: false,
+                animation: { duration: 300 }, // Transición visual rápida
                 scales: {
                     y: { min: 0, max: 100, grid: { color: '#1e293b' } },
                     x: { grid: { display: false } }
@@ -83,7 +83,6 @@
 
         let intervaloEnVivo;
 
-        // Función para consultar los datos recientes en Tiempo Real (Cada 4 segundos)
         async function cargarTiempoReal() {
             document.getElementById('tituloTabla').innerText = "Últimos Registros Guardados";
             clearInterval(intervaloEnVivo);
@@ -92,32 +91,32 @@
                 const res = await fetch('/api/historial/reciente');
                 const datos = await res.json();
                 
-                // Actualizar Etiquetas y Datos de la Gráfica
-                chart.data.labels = datos.map(d => d.fecha_hora);
-                chart.data.datasets[0].data = datos.map(d => d.porcentaje);
+                // Procesamiento síncrono para la gráfica (Línea de tiempo progresiva)
+                const datosGrafica = [...datos].reverse();
+                chart.data.labels = datosGrafica.map(d => d.fecha_hora);
+                chart.data.datasets[0].data = datosGrafica.map(d => d.porcentaje);
                 chart.update();
 
-                // Construcción de la tabla en vivo
+                // Carga directa de alta velocidad en la tabla
                 const tabla = document.getElementById('tablaCuerpo');
                 tabla.innerHTML = datos.map(d => `
-                    <tr class="border-b border-gray-700 hover:bg-gray-800 transition">
-                        <td class="px-4 py-3 text-gray-300">${d.fecha_hora}</td>
+                    <tr class="border-b border-slate-800 hover:bg-slate-800/40 transition">
+                        <td class="px-4 py-3 text-slate-300">${d.fecha_hora}</td>
                         <td class="px-4 py-3 font-semibold ${
                             d.categoria === 'Ruido Alto' ? 'text-red-400' : 
                             d.categoria === 'Moderado' ? 'text-yellow-400' : 'text-green-400'
                         }">${d.categoria}</td>
-                        <td class="px-4 py-3 text-gray-400">${d.porcentaje}% (Nivel: ${d.valor_bruto})</td>
+                        <td class="px-4 py-3 text-slate-400 font-mono">${d.porcentaje}% (Nivel: ${d.valor_bruto})</td>
                     </tr>
                 `).join('');
             }
             
             actualizar();
-            intervaloEnVivo = setInterval(actualizar, 4000);
+            intervaloEnVivo = setInterval(actualizar, 4000); // Frecuencia de muestreo óptima
         }
 
-        // Función para aplicar el FILTRO de MongoDB (Alertas Críticas)
         async function filtrarAlertas() {
-            clearInterval(intervaloEnVivo); // Detiene el bucle en vivo
+            clearInterval(intervaloEnVivo);
             document.getElementById('tituloTabla').innerText = "Historial de Alertas Críticas (Filtro MongoDB)";
             
             const res = await fetch('/api/historial/alertas');
@@ -129,21 +128,16 @@
                 return;
             }
 
-            // Renderizado directo del campo fecha_hora corregido sin .split('T')
             tabla.innerHTML = datos.map(d => `
                 <tr class="border-b border-slate-800 hover:bg-slate-800/30">
-                    <td class="px-4 py-3 text-gray-300">${d.fecha_hora}</td>
-                    <td class="px-4 py-3">
-                        <span class="${d.alerta_critica ? 'text-red-400 font-bold' : 'text-slate-300'}">
-                            ${d.categoria}
-                        </span>
-                    </td>
+                    <td class="px-4 py-3 text-slate-300">${d.fecha_hora}</td>
+                    <td class="px-4 py-3 text-red-400 font-bold">${d.categoria}</td>
                     <td class="px-4 py-3 font-mono">${d.porcentaje}% (Nivel: ${d.valor_bruto})</td>
                 </tr>
             `).join('');
         }
 
-        // Inicializar el flujo en tiempo real de forma automática al cargar la vista
+        // Ejecución inicial automática
         cargarTiempoReal();
     </script>
 </body>
