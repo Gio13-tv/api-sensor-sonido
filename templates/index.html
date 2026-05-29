@@ -1,9 +1,9 @@
-<!DOCTYPE html>
+¿<!DOCTYPE html>
 <html lang="es">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>SONIDOCare Panel</title>
+    <title>SONIDOFlop Panel</title>
     <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 </head>
@@ -12,11 +12,11 @@
     <div class="max-w-5xl mx-auto space-y-6">
         <header class="flex justify-between items-center border-b border-slate-800 pb-4">
             <h1 class="text-3xl font-bold tracking-tight text-cyan-400">SONIDO<span class="text-white">Care</span></h1>
-            <span class="bg-emerald-500/10 text-emerald-400 text-xs font-medium px-2.5 py-0.5 rounded-full border border-emerald-500/20">Telemetría de Hardware Activa</span>
+            <span class="bg-emerald-500/10 text-emerald-400 text-xs font-medium px-2.5 py-0.5 rounded-full border border-emerald-500/20">Transmisión RAM en Vivo</span>
         </header>
 
         <div class="bg-slate-900 border border-slate-800 rounded-xl p-6 shadow-xl">
-            <h2 class="text-xl font-semibold mb-4 text-slate-300">Monitoreo de Ruido Físico en Vivo</h2>
+            <h2 class="text-xl font-semibold mb-4 text-slate-300">Monitoreo de Ruido Real (Tiempo Real Fijo)</h2>
             <div class="h-64">
                 <canvas id="graficaTiempoReal"></canvas>
             </div>
@@ -24,10 +24,9 @@
 
         <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
             <div class="md:col-span-1 bg-slate-900 border border-slate-800 rounded-xl p-6 flex flex-col gap-4">
-                <h3 class="text-lg font-medium text-slate-200">Consultas de Base de Datos</h3>
-                <p class="text-sm text-slate-400">Filtros de alta velocidad directo sobre MongoDB Atlas.</p>
-                
-                <button onclick="cargarTiempoReal()" class="w-full bg-cyan-600 hover:bg-cyan-500 text-white font-medium py-2 px-4 rounded-lg transition cursor-pointer">
+                <h3 class="text-lg font-medium text-slate-200">Controles</h3>
+                <p class="text-sm text-slate-400">Cambia entre el flujo continuo en memoria o las alertas de la base de datos.</p>
+                <button onclick="conectarFlujoVivo()" class="w-full bg-cyan-600 hover:bg-cyan-500 text-white font-medium py-2 px-4 rounded-lg transition cursor-pointer">
                     Ver Flujo En Vivo
                 </button>
                 <button onclick="filtrarAlertas()" class="w-full bg-red-950 hover:bg-red-900 text-red-200 font-medium py-2 px-4 rounded-lg border border-red-800/50 transition cursor-pointer">
@@ -67,13 +66,13 @@
                     backgroundColor: 'rgba(34, 211, 238, 0.05)',
                     borderWidth: 2,
                     fill: true,
-                    tension: 0.35
+                    tension: 0.2
                 }]
             },
             options: {
                 responsive: true,
                 maintainAspectRatio: false,
-                animation: { duration: 300 }, // Transición visual rápida
+                animation: false, // Desactivado para velocidad instantánea
                 scales: {
                     y: { min: 0, max: 100, grid: { color: '#1e293b' } },
                     x: { grid: { display: false } }
@@ -82,37 +81,57 @@
         });
 
         let intervaloEnVivo;
+        const MAX_PUNTOS_GRAFICA = 15; // Mantiene los últimos 15 puntos en pantalla
 
-        async function cargarTiempoReal() {
-            document.getElementById('tituloTabla').innerText = "Últimos Registros Guardados";
+        function conectarFlujoVivo() {
+            document.getElementById('tituloTabla').innerText = "Últimos Registros Guardados (Flujo RAM)";
             clearInterval(intervaloEnVivo);
             
-            async function actualizar() {
-                const res = await fetch('/api/historial/reciente');
-                const datos = await res.json();
-                
-                // Procesamiento síncrono para la gráfica (Línea de tiempo progresiva)
-                const datosGrafica = [...datos].reverse();
-                chart.data.labels = datosGrafica.map(d => d.fecha_hora);
-                chart.data.datasets[0].data = datosGrafica.map(d => d.porcentaje);
-                chart.update();
+            const tabla = document.getElementById('tablaCuerpo');
+            tabla.innerHTML = ''; // Limpieza inicial
 
-                // Carga directa de alta velocidad en la tabla
-                const tabla = document.getElementById('tablaCuerpo');
-                tabla.innerHTML = datos.map(d => `
-                    <tr class="border-b border-slate-800 hover:bg-slate-800/40 transition">
-                        <td class="px-4 py-3 text-slate-300">${d.fecha_hora}</td>
-                        <td class="px-4 py-3 font-semibold ${
-                            d.categoria === 'Ruido Alto' ? 'text-red-400' : 
-                            d.categoria === 'Moderado' ? 'text-yellow-400' : 'text-green-400'
-                        }">${d.categoria}</td>
-                        <td class="px-4 py-3 text-slate-400 font-mono">${d.porcentaje}% (Nivel: ${d.valor_bruto})</td>
-                    </tr>
-                `).join('');
+            async function actualizar() {
+                const res = await fetch('/api/en_vivo_ram');
+                const d = await res.json();
+                
+                if (d.fecha_hora === "--:--:--") return; // Espera al primer dato real
+
+                // 1. Actualización progresiva de la Gráfica (Desplazamiento horizontal fluido)
+                if (chart.data.labels.length >= MAX_PUNTOS_GRAFICA) {
+                    chart.data.labels.shift();
+                    chart.data.datasets[0].data.shift();
+                }
+                
+                // Evita duplicar el último punto si el ESP32 no ha mandado dato nuevo en ese segundo
+                if (chart.data.labels[chart.data.labels.length - 1] !== d.fecha_hora) {
+                    chart.data.labels.push(d.fecha_hora);
+                    chart.data.datasets[0].data.push(d.porcentaje);
+                    chart.update();
+
+                    // 2. Inserción inmediata arriba en la Tabla
+                    const nuevaFila = `
+                        <tr class="border-b border-slate-800 hover:bg-slate-800/40 transition animate-fade-in">
+                            <td class="px-4 py-3 text-slate-300">${d.fecha_hora}</td>
+                            <td class="px-4 py-3 font-semibold ${
+                                d.categoria === 'Ruido Alto' ? 'text-red-400' : 
+                                d.categoria === 'Moderado' ? 'text-yellow-400' : 'text-green-400'
+                            }">${d.categoria}</td>
+                            <td class="px-4 py-3 text-slate-400 font-mono">${d.porcentaje}% (Nivel: ${d.valor_bruto})</td>
+                        </tr>
+                    `;
+                    
+                    tabla.insertAdjacentHTML('afterbegin', nuevaFila);
+
+                    // Mantener la tabla limpia recortando a un máximo de 20 filas visuales
+                    if (tabla.children.length > 20) {
+                        tabla.lastElementChild.remove();
+                    }
+                }
             }
             
             actualizar();
-            intervaloEnVivo = setInterval(actualizar, 4000); // Frecuencia de muestreo óptima
+            // Muestreo ultra veloz a 1 segundo para respuesta inmediata
+            intervaloEnVivo = setInterval(actualizar, 1000); 
         }
 
         async function filtrarAlertas() {
@@ -137,8 +156,8 @@
             `).join('');
         }
 
-        // Ejecución inicial automática
-        cargarTiempoReal();
+        // Arrancar el flujo en tiempo real de inmediato al cargar la página
+        conectarFlujoVivo();
     </script>
 </body>
 </html>

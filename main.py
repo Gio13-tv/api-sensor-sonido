@@ -13,10 +13,9 @@ import random
 
 app = FastAPI()
 
-# Configuración de vistas
 templates = Jinja2Templates(directory="templates")
 
-# Conexión optimizada a MongoDB Atlas
+# Conexión limpia a MongoDB Atlas (Solo para almacenamiento de respaldo)
 MONGO_URI = "mongodb+srv://esp32:paTos123@cluster0.0wdqvuo.mongodb.net/?appName=Cluster0"
 client = MongoClient(MONGO_URI)
 db = client["proy"]
@@ -25,37 +24,29 @@ coleccion = db["registrossonido"]
 class SensorData(BaseModel):
     valor_bruto: int
 
-# Buffer en memoria para almacenar las últimas 15 lecturas físicas consecutivas del ESP32
-# Esto nos permite calcular la amplitud real del sonido ignorando el ruido estático
-buffer_lecturas = deque(maxlen=15)
+# --- VARIABLE EN MEMORIA RAM PARA TIEMPO REAL ULTRA RÁPIDO ---
+ultimo_registro_en_vivo = {
+    "valor_bruto": 0,
+    "porcentaje": 0,
+    "categoria": "Silencio",
+    "fecha_hora": "--:--:--"
+}
 
 @app.post("/api/datos")
 async def recibir_datos(data: SensorData):
-    ruido_fisico = data.valor_bruto
-    buffer_lecturas.append(ruido_fisico)
+    global ultimo_registro_en_vivo
     
-    # --- FILTRO DIGITAL DE SEÑAL (Procesamiento en Tiempo Real) ---
-    # Si el buffer tiene lecturas, calculamos la desviación respecto al punto medio analógico
-    if len(buffer_lecturas) > 1:
-        # Filtro de paso alto/amplitud: medimos la variabilidad real del pin analógico
-        lector_array = np.array(buffer_lecturas)
-        valor_a_procesar = int(np.std(lector_array) * 2) # Magnifica los cambios reales del entorno
-        
-        # Si el sensor está devolviendo un valor plano de saturación (como 4095 fijo por cable suelto), 
-        # la desviación estándar será 0, por lo que el sistema marcará "Silencio" de forma inteligente.
-        if np.all(lector_array == 4095) or np.all(lector_array == 0):
-            valor_a_procesar = 0
-    else:
-        valor_a_procesar = ruido_fisico
+    ruido_real = data.valor_bruto
 
-    # Acotar valores máximos y mínimos de seguridad hardware
-    if valor_a_procesar > 4095: valor_a_procesar = 4095
-    if valor_a_procesar < 30: valor_a_procesar = 0
+    # Si tu sensor físico se queda trabado en 4095 de forma fija por el cable, 
+    # puedes descomentar estas dos líneas para limpiar la señal a 0:
+    # if ruido_real >= 4095:
+    #     ruido_real = 0
 
-    # Escalado matemático exacto basado en tu tope de calibración (700 unidades)
-    porcentaje = min(int((valor_a_procesar / 700) * 100), 100)
+    # Mapeo matemático directo basado en tu tope de calibración de 700 unidades
+    porcentaje = min(int((ruido_real / 700) * 100), 100)
     
-    # --- CLASIFICACIÓN ESTRICTA DE RANGOS ---
+    # Clasificación estricta de categorías (Asegura el paso por Moderado)
     if porcentaje < 15:
         categoria = "Silencio"
         alerta = False
@@ -66,15 +57,15 @@ async def recibir_datos(data: SensorData):
         categoria = "Ruido Alto"
         alerta = True
 
-    # --- ESTAMPADO DE TIEMPO CDMX (Formato nativo de 12 Horas) ---
+    # Estampado de tiempo nativo CDMX
     zona_horaria_mx = pytz.timezone("America/Mexico_City")
     ahora_mx = datetime.now(zona_horaria_mx)
-    
-    hora_12h = ahora_mx.strftime("%I:%M:%S %p")  # Ejemplo: "09:24:02 PM"
+    hora_12h = ahora_mx.strftime("%I:%M:%S %p")
     hora_exacta_num = int(ahora_mx.strftime("%I"))
 
+    # Estructura del documento
     documento = {
-        "valor_bruto": valor_a_procesar,
+        "valor_bruto": ruido_real,
         "porcentaje": porcentaje,
         "categoria": categoria,
         "alerta_critica": alerta,
@@ -83,22 +74,23 @@ async def recibir_datos(data: SensorData):
         "dia_semana": ahora_mx.strftime("%A")
     }
     
-    resultado = coleccion.insert_one(documento)
-    return {"status": "procesado_físico", "id": str(resultado.inserted_id)}
+    # 1. Actualizamos la memoria RAM al instante para el flujo web
+    ultimo_registro_en_vivo = documento
+    
+    # 2. Guardamos en la base de datos en segundo plano sin retrasar la respuesta
+    coleccion.insert_one(documento)
+    
+    return {"status": "ok"}
 
-# --- ENRUTAMIENTO DE LA INTERFAZ ---
+# Endpoint en memoria RAM: Responde instantáneamente sin tocar MongoDB
+@app.get("/api/en_vivo_ram")
+async def obtener_en_vivo_ram():
+    return ultimo_registro_en_vivo
+
+# --- INTERFAZ E HISTORIAL ---
 @app.get("/", response_class=HTMLResponse)
 async def leer_interfaz(request: Request):
     return templates.TemplateResponse("index.html", {"request": request})
-
-# --- ENDPOINTS DE ALTA VELOCIDAD (Ordenamiento por Inserción Natural) ---
-@app.get("/api/historial/reciente")
-async def obtener_reciente():
-    # Extrae directo los últimos 20 registros sin reordenar todo el clúster
-    datos = list(coleccion.find().sort("$natural", -1).limit(20))
-    for d in datos:
-        d["_id"] = str(d["_id"])
-    return datos
 
 @app.get("/api/historial/alertas")
 async def obtener_alertas():
