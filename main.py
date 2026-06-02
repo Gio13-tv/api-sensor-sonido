@@ -9,7 +9,7 @@ from pymongo import MongoClient
 
 app = FastAPI()
 
-# Inicialización de plantillas HTML
+# 1. DEFINICIÓN OBLIGATORIA DE TEMPLATES (Corrige el error de tu VS Code)
 templates = Jinja2Templates(directory="templates")
 
 # Conexión optimizada a MongoDB Atlas
@@ -21,16 +21,16 @@ coleccion = db["registrossonido"]
 class SensorData(BaseModel):
     valor_bruto: int
 
-# --- ADMINISTRADOR DE WEBSOCKETS PARA TRANSMISIÓN EN TIEMPO REAL ---
+# --- ADMINISTRADOR DE WEBSOCKETS EN MEMORIA RAM ---
 class ConnectionManager:
     def __init__(self):
         self.active_connections: list[WebSocket] = []
 
-    async def class_connect(self, websocket: WebSocket):
+    async def connect(self, websocket: WebSocket):
         await websocket.accept()
         self.active_connections.append(websocket)
 
-    def class_disconnect(self, websocket: WebSocket):
+    def disconnect(self, websocket: WebSocket):
         if websocket in self.active_connections:
             self.active_connections.remove(websocket)
 
@@ -47,16 +47,16 @@ manager = ConnectionManager()
 async def recibir_datos(data: SensorData):
     ruido_real = data.valor_bruto
 
-    # Filtro umbilical para limpiar el ruido eléctrico de fondo en el protoboard
+    # Filtro de umbral para ignorar el ruido estático del protoboard
     if ruido_real < 120:
         valor_a_procesar = 0
     else:
         valor_a_procesar = ruido_real
 
-    # Escalado matemático exacto basado en tu umbral de 700 unidades
+    # Mapeo matemático directo basado en tu umbral de 700 unidades
     porcentaje = min(int((valor_a_procesar / 700) * 100), 100)
     
-    # Clasificación estricta de categorías (Garantiza el paso por Moderado)
+    # Clasificación estricta de rangos (Pasa limpio por Silencio, Moderado y Alto)
     if porcentaje < 15:
         categoria = "Silencio"
         alerta = False
@@ -67,7 +67,7 @@ async def recibir_datos(data: SensorData):
         categoria = "Ruido Alto"
         alerta = True
 
-    # Estampado de tiempo nativo de la CDMX (Formato de 12 horas)
+    # Tiempo nativo de la CDMX (Formato de 12 horas)
     zona_horaria_mx = pytz.timezone("America/Mexico_City")
     ahora_mx = datetime.now(zona_horaria_mx)
     hora_12h = ahora_mx.strftime("%I:%M:%S %p")
@@ -83,33 +83,32 @@ async def recibir_datos(data: SensorData):
         "dia_semana": ahora_mx.strftime("%A")
     }
     
-    # 1. TRANSMISIÓN EN TIEMPO REAL: Se envía al frontend instantáneamente por la RAM (Cero latencia)
+    # Transmisión síncrona inmediata por WebSocket (RAM)
     await manager.broadcast(documento)
     
-    # 2. ALMACENAMIENTO DE RESPALDO: Se guarda en MongoDB en segundo plano
+    # Inserción en segundo plano en MongoDB Atlas (Tus 7,000 registros históricos)
     coleccion.insert_one(documento)
     
-    return {"status": "procesado_y_transmitido"}
+    return {"status": "ok_transmitido"}
 
-# Ruta del Canal WebSocket para el Dashboard
+# --- RUTA CORREGIDA DEL CANAL WEBSOCKET ---
 @app.websocket("/ws/live")
 async def websocket_endpoint(websocket: WebSocket):
-    await manager.class_connect(websocket)
+    await manager.connect(websocket)
     try:
         while True:
-            # Mantiene la conexión abierta escuchando señales de vida
-            await websocket.receive_text()
+            await websocket.receive_text()  # Mantiene el canal abierto
     except WebSocketDisconnect:
-        manager.class_disconnect(websocket)
+        manager.disconnect(websocket)
 
 # --- ENRUTAMIENTO DE LA INTERFAZ WEB ---
 @app.get("/", response_class=HTMLResponse)
 async def leer_interfaz(request: Request):
     return templates.TemplateResponse("index.html", {"request": request})
 
-# Carga inicial rápida: Trae solo los últimos 10 registros al abrir la página
 @app.get("/api/historial/inicial")
 async def obtener_inicial():
+    # Carga inicial rápida de los últimos 10 datos para no saturar con los 7,000 registros
     datos = list(coleccion.find().sort("$natural", -1).limit(10))
     for d in datos:
         d["_id"] = str(d["_id"])
