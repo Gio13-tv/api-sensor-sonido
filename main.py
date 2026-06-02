@@ -9,10 +9,10 @@ from pymongo import MongoClient
 
 app = FastAPI()
 
-# Carpetas de vistas
+# Configuración de carpetas para los archivos HTML
 templates = Jinja2Templates(directory="templates")
 
-# Conexión limpia a MongoDB Atlas
+# Conexión limpia y directa a MongoDB Atlas
 MONGO_URI = "mongodb+srv://esp32:paTos123@cluster0.0wdqvuo.mongodb.net/?appName=Cluster0"
 client = MongoClient(MONGO_URI)
 db = client["proy"]
@@ -21,7 +21,7 @@ coleccion = db["registrossonido"]
 class SensorData(BaseModel):
     valor_bruto: int
 
-# --- CONTROLADOR GLOBAL DE CONEXIONES VIVAS ---
+# --- CONTROLADOR GLOBAL DE CONEXIONES EN VIVO (RAM) ---
 class ConnectionManager:
     def __init__(self):
         self.active_connections: list[WebSocket] = []
@@ -43,12 +43,18 @@ class ConnectionManager:
 
 manager = ConnectionManager()
 
+# --- ENDPOINT POST: RECIBE DATOS DEL ESP32 ---
 @app.post("/api/datos")
 async def recibir_datos(data: SensorData):
     ruido_real = data.valor_bruto
 
-    # Filtro automático: Si el sensor físico se traba en 4095 por falso contacto,
-    # lo mandamos a 0 para que la gráfica no se quede congelada arriba.
+    # --- CHISMOSO DE CONSOLA (LOGS DE AUDITORÍA) ---
+    print("\n" + "="*40)
+    print(f"¡LLEGÓ UN DATO DEL ESP32! -> Valor Bruto Recibido: {ruido_real}")
+    print("="*40 + "\n")
+
+    # Bypass de seguridad: Si el pin físico del microcontrolador se queda pegado 
+    # en el límite del ADC (4095) por falso contacto, lo forzamos a 0 para no trabar la gráfica.
     if ruido_real >= 4095:
         valor_a_procesar = 0
     elif ruido_real < 120:
@@ -56,10 +62,10 @@ async def recibir_datos(data: SensorData):
     else:
         valor_a_procesar = ruido_real
 
-    # Mapeo a porcentaje basado en tu tope de 700 unidades
+    # Mapeo a porcentaje basado en tu umbral de 700 unidades
     porcentaje = min(int((valor_a_procesar / 700) * 100), 100)
     
-    # Clasificación exacta de categorías
+    # Clasificación estricta de categorías
     if porcentaje < 15:
         categoria = "Silencio"
         alerta = False
@@ -70,6 +76,7 @@ async def recibir_datos(data: SensorData):
         categoria = "Ruido Alto"
         alerta = True
 
+    # Gestión del tiempo para México
     zona_horaria_mx = pytz.timezone("America/Mexico_City")
     ahora_mx = datetime.now(zona_horaria_mx)
     hora_12h = ahora_mx.strftime("%I:%M:%S %p")
@@ -85,25 +92,30 @@ async def recibir_datos(data: SensorData):
         "dia_semana": ahora_mx.strftime("%A")
     }
     
-    # Transmitir de golpe por la RAM a los navegadores abiertos
+    # Transmisión inmediata por memoria RAM a los navegadores web conectados
     await manager.broadcast(documento)
     
-    # Guardar respaldo en la base de datos
+    # Respaldo histórico asíncrono en MongoDB Atlas
     coleccion.insert_one(documento)
     
     return {"status": "enviado_al_vuelo"}
 
-# --- CONFIGURACIÓN ESTÁNDAR DE WEBSOCKET PARA EVITAR EL 404 ---
+# --- ENDPOINT WEBSOCKET: MANTIENE EL CANAL VIVO ---
 @app.websocket("/ws/live")
 async def websocket_endpoint(websocket: WebSocket):
     await manager.connect(websocket)
     try:
         while True:
-            # Escucha activa para mantener el canal abierto sin cerrarse por inactividad
+            # Escucha infinita y segura: Esto mantiene el puente abierto con el navegador
+            # impidiendo que se cierre abruptamente de forma automática.
             await websocket.receive_text()
     except WebSocketDisconnect:
         manager.disconnect(websocket)
+    except Exception as e:
+        print(f"Aviso controlado sobre el estado del canal: {e}")
+        manager.disconnect(websocket)
 
+# --- RUTAS DE CONSULTA E INTERFAZ UI ---
 @app.get("/", response_class=HTMLResponse)
 async def leer_interfaz(request: Request):
     return templates.TemplateResponse("index.html", {"request": request})
