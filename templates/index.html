@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>SONIDOCare Panel</title>
+    <title>SONIDOFlop Panel</title>
     <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 </head>
@@ -11,20 +11,21 @@
 
     <div class="max-w-5xl mx-auto space-y-6">
         <header class="flex justify-between items-center border-b border-slate-800 pb-4">
-            <h1 class="text-3xl font-bold tracking-tight text-cyan-400">SONIDO<span class="text-white">Care</span></h1>
-            <span id="estadoConexion" class="bg-red-500/10 text-red-400 text-xs font-medium px-2.5 py-0.5 rounded-full border border-red-500/20">Desconectado</span>
+            <h1 class="text-3xl font-bold tracking-tight text-cyan-400">SONIDO<span class="text-white">Flop</span></h1>
+            <span id="estadoConexion" class="bg-amber-500/10 text-amber-400 text-xs font-medium px-2.5 py-0.5 rounded-full border border-amber-500/20">Conectando...</span>
         </header>
 
         <div class="bg-slate-900 border border-slate-800 rounded-xl p-6 shadow-xl">
-            <h2 class="text-xl font-semibold mb-4 text-slate-300">Monitoreo Físico por WebSockets (Instantáneo)</h2>
+            <h2 class="text-xl font-semibold mb-4 text-slate-300">Deteccion de ruido en tiempo real</h2>
             <div class="h-64">
-                <canvas id="graficaTiempoReal"></canvas>
+                <canvas id="graficaLive"></canvas>
             </div>
         </div>
 
         <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
             <div class="md:col-span-1 bg-slate-900 border border-slate-800 rounded-xl p-6 flex flex-col gap-4">
                 <h3 class="text-lg font-medium text-slate-200">Panel de Control</h3>
+                <p class="text-sm text-slate-400">Gestiona el flujo de datos en tiempo real.</p>
                 <button onclick="location.reload()" class="w-full bg-cyan-600 hover:bg-cyan-500 text-white font-medium py-2 px-4 rounded-lg transition cursor-pointer">
                     Reiniciar Flujo Vivo
                 </button>
@@ -34,8 +35,8 @@
             </div>
 
             <div class="md:col-span-2 bg-slate-900 border border-slate-800 rounded-xl p-6">
-                <h3 id="tituloTabla" class="text-lg font-medium text-slate-200 mb-4">Flujo de Datos en Tiempo Real</h3>
-                <div class="overflow-x-auto max-h-48">
+                <h3 id="tituloTabla" class="text-lg font-medium text-slate-200 mb-4">Datos Recientes</h3>
+                <div class="overflow-x-auto max-h-48 scrollbar-thin">
                     <table class="w-full text-sm text-left text-slate-400">
                         <thead class="text-xs text-slate-300 uppercase bg-slate-800/50">
                             <tr>
@@ -44,7 +45,8 @@
                                 <th class="px-4 py-3">Porcentaje (Valor Bruto)</th>
                             </tr>
                         </thead>
-                        <tbody id="tablaCuerpo"></tbody>
+                        <tbody id="tablaCuerpo">
+                            </tbody>
                     </table>
                 </div>
             </div>
@@ -52,68 +54,128 @@
     </div>
 
     <script>
-        const ctx = document.getElementById('graficaTiempoReal').getContext('2d');
+        const ctx = document.getElementById('graficaLive').getContext('2d');
         const chart = new Chart(ctx, {
             type: 'line',
-            data: { labels: [], datasets: [{ label: 'Nivel Real %', data: [], borderColor: '#22d3ee', backgroundColor: 'rgba(34, 211, 238, 0.05)', borderWidth: 2, fill: true, tension: 0.15 }] },
-            options: { responsive: true, maintainAspectRatio: false, animation: false, scales: { y: { min: 0, max: 100, grid: { color: '#1e293b' } }, x: { grid: { display: false } } } }
+            data: {
+                labels: [],
+                datasets: [{
+                    label: 'Intensidad de Sonido (%)',
+                    data: [],
+                    borderColor: '#22d3ee',
+                    backgroundColor: 'rgba(34, 211, 238, 0.03)',
+                    borderWidth: 2,
+                    fill: true,
+                    tension: 0.2
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                animation: { duration: 150 }, // Animación ultra corta para que se vea estético pero rápido
+                scales: {
+                    y: { min: 0, max: 100, grid: { color: '#1e293b' } },
+                    x: { grid: { display: false } }
+                }
+            }
         });
 
         const tabla = document.getElementById('tablaCuerpo');
         const estado = document.getElementById('estadoConexion');
+        const MAX_PUNTOS = 12; // Cantidad de muestras visibles en pantalla
 
-        // Protocolo automático de WebSocket (Detecta si está local o en Render de forma nativa)
-        const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-        const wsUrl = `${protocol}//${window.location.host}/ws/en_vivo`;
-        const ws = new WebSocket(wsUrl);
-
-        ws.onopen = () => {
-            estado.innerText = "Transmisión en Vivo Conectada";
-            estado.className = "bg-emerald-500/10 text-emerald-400 text-xs font-medium px-2.5 py-0.5 rounded-full border border-emerald-500/20";
-        };
-
-        ws.onmessage = (event) => {
-            const d = JSON.parse(event.data);
-
-            // 1. Empujar datos a la gráfica inmediatamente
-            if (chart.data.labels.length >= 12) {
-                chart.data.labels.shift();
-                chart.data.datasets[0].data.shift();
-            }
-            chart.data.labels.push(d.fecha_hora);
-            chart.data.datasets[0].data.push(d.porcentaje);
+        // Carga inicial rápida de los últimos 10 datos al entrar a la página
+        async function preinicializarDashboard() {
+            const res = await fetch('/api/historial/inicial');
+            const datos = await res.json();
+            
+            // Pintar gráfica inicial cronológicamente
+            const datosGrafica = [...datos].reverse();
+            chart.data.labels = datosGrafica.map(d => d.fecha_hora);
+            chart.data.datasets[0].data = datosGrafica.map(d => d.porcentaje);
             chart.update();
 
-            // 2. Insertar fila superior en la tabla
-            const fila = `
+            // Pintar tabla inicial
+            tabla.innerHTML = datos.map(d => `
                 <tr class="border-b border-slate-800 hover:bg-slate-800/40 transition">
                     <td class="px-4 py-3 text-slate-300">${d.fecha_hora}</td>
-                    <td class="px-4 py-3 font-semibold ${d.categoria === 'Ruido Alto' ? 'text-red-400' : d.categoria === 'Moderado' ? 'text-yellow-400' : 'text-green-400'}">${d.categoria}</td>
-                    <td class="px-4 py-3 text-slate-400 font-mono">${d.porcentaje}% (Nivel: ${d.valor_bruto})</td>
+                    <td class="px-4 py-3 font-semibold ${
+                        d.categoria === 'Ruido Alto' ? 'text-red-400' : 
+                        d.categoria === 'Moderado' ? 'text-yellow-400' : 'text-green-400'
+                    }">${d.categoria}</td>
+                    <td class="px-4 py-3 text-slate-400 font-mono">${d.porcentaje}% (${d.valor_bruto})</td>
                 </tr>
-            `;
-            tabla.insertAdjacentHTML('afterbegin', fila);
-            if (tabla.children.length > 15) tabla.lastElementChild.remove();
-        };
+            `).join('');
+            
+            conectarWebSocket();
+        }
 
-        ws.onclose = () => {
-            estado.innerText = "Desconectado - Reconectando";
-            estado.className = "bg-red-500/10 text-red-400 text-xs font-medium px-2.5 py-0.5 rounded-full border border-red-500/20";
-        };
+        // Conexión síncrona por WebSocket
+        function conectarWebSocket() {
+            const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+            const wsUrl = `${protocol}//${window.location.host}/ws/live`;
+            const ws = new WebSocket(wsUrl);
+
+            ws.onopen = () => {
+                estado.innerText = "Transmisión RAM en Vivo Activa";
+                estado.className = "bg-emerald-500/10 text-emerald-400 text-xs font-medium px-2.5 py-0.5 rounded-full border border-emerald-500/20";
+            };
+
+            ws.onmessage = (event) => {
+                const d = JSON.parse(event.data);
+
+                // 1. Desplazamiento progresivo de la gráfica en vivo
+                if (chart.data.labels.length >= MAX_PUNTOS) {
+                    chart.data.labels.shift();
+                    chart.data.datasets[0].data.shift();
+                }
+                chart.data.labels.push(d.fecha_hora);
+                chart.data.datasets[0].data.push(d.porcentaje);
+                chart.update();
+
+                // 2. Inserción inmediata arriba en la tabla
+                const nuevaFila = `
+                    <tr class="border-b border-slate-800 hover:bg-slate-800/40 transition">
+                        <td class="px-4 py-3 text-slate-300">${d.fecha_hora}</td>
+                        <td class="px-4 py-3 font-semibold ${
+                            d.categoria === 'Ruido Alto' ? 'text-red-400' : 
+                            d.categoria === 'Moderado' ? 'text-yellow-400' : 'text-green-400'
+                        }">${d.categoria}</td>
+                        <td class="px-4 py-3 text-slate-400 font-mono">${d.porcentaje}% (${d.valor_bruto})</td>
+                    </tr>
+                `;
+                tabla.insertAdjacentHTML('afterbegin', nuevaFila);
+
+                // Evitamos que la tabla crezca infinitamente en el navegador
+                if (tabla.children.length > 15) {
+                    tabla.lastElementChild.remove();
+                }
+            };
+
+            ws.onclose = () => {
+                estado.innerText = "Desconectado del servidor";
+                estado.className = "bg-red-500/10 text-red-400 text-xs font-medium px-2.5 py-0.5 rounded-full border border-red-500/20";
+                // Intento de reconexión automática en 3 segundos si cae el servidor
+                setTimeout(conectarWebSocket, 3000);
+            };
+        }
 
         async function filtrarAlertas() {
-            ws.close(); // Pausamos el canal rápido para ver el reporte estático
-            document.getElementById('tituloTabla').innerText = "Historial de Alertas Críticas (MongoDB)";
+            document.getElementById('tituloTabla').innerText = "Historial de Alertas Críticas";
             const res = await fetch('/api/historial/alertas');
             const datos = await res.json();
+
             tabla.innerHTML = datos.map(d => `
                 <tr class="border-b border-slate-800 bg-red-950/10">
                     <td class="px-4 py-3 text-slate-300">${d.fecha_hora}</td>
                     <td class="px-4 py-3 text-red-400 font-bold">${d.categoria}</td>
-                    <td class="px-4 py-3 font-mono">${d.porcentaje}% (Nivel: ${d.valor_bruto})</td>
+                    <td class="px-4 py-3 font-mono">${d.porcentaje}% (${d.valor_bruto})</td>
                 </tr>
             `).join('');
         }
+
+        // Ejecución inmediata
+        preinicializarDashboard();
     </script>
 </body>
 </html>

@@ -1,4 +1,5 @@
 import os
+import pytz
 from datetime import datetime
 from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import HTMLResponse
@@ -8,10 +9,11 @@ from pymongo import MongoClient
 
 app = FastAPI()
 
+# Inicialización de plantillas HTML
 templates = Jinja2Templates(directory="templates")
 
-# Conexión Segura a MongoDB Atlas
-MONGO_URI = os.getenv("MONGO_URI", "mongodb+srv://esp32:paTos123@cluster0.0wdqvuo.mongodb.net/?appName=Cluster0")
+# Conexión optimizada a MongoDB Atlas
+MONGO_URI = "mongodb+srv://esp32:paTos123@cluster0.0wdqvuo.mongodb.net/?appName=Cluster0"
 client = MongoClient(MONGO_URI)
 db = client["proy"]
 coleccion = db["registrossonido"]
@@ -19,17 +21,18 @@ coleccion = db["registrossonido"]
 class SensorData(BaseModel):
     valor_bruto: int
 
-# Administrador de conexiones WebSocket en tiempo real
+# --- ADMINISTRADOR DE WEBSOCKETS PARA TRANSMISIÓN EN TIEMPO REAL ---
 class ConnectionManager:
     def __init__(self):
         self.active_connections: list[WebSocket] = []
 
-    async def connect(self, websocket: WebSocket):
+    async def class_connect(self, websocket: WebSocket):
         await websocket.accept()
         self.active_connections.append(websocket)
 
-    def disconnect(self, websocket: WebSocket):
-        self.active_connections.remove(websocket)
+    def class_disconnect(self, websocket: WebSocket):
+        if websocket in self.active_connections:
+            self.active_connections.remove(websocket)
 
     async def broadcast(self, message: dict):
         for connection in self.active_connections:
@@ -44,8 +47,8 @@ manager = ConnectionManager()
 async def recibir_datos(data: SensorData):
     ruido_real = data.valor_bruto
 
-    # Filtro físico directo: Evitamos falsos positivos por ruido eléctrico de fondo
-    if ruido_real < 80:
+    # Filtro umbilical para limpiar el ruido eléctrico de fondo en el protoboard
+    if ruido_real < 120:
         valor_a_procesar = 0
     else:
         valor_a_procesar = ruido_real
@@ -53,7 +56,7 @@ async def recibir_datos(data: SensorData):
     # Escalado matemático exacto basado en tu umbral de 700 unidades
     porcentaje = min(int((valor_a_procesar / 700) * 100), 100)
     
-    # Clasificación estricta de rangos para asegurar el paso por "Moderado"
+    # Clasificación estricta de categorías (Garantiza el paso por Moderado)
     if porcentaje < 15:
         categoria = "Silencio"
         alerta = False
@@ -64,10 +67,11 @@ async def recibir_datos(data: SensorData):
         categoria = "Ruido Alto"
         alerta = True
 
-    # Estampado de tiempo rápido compatible con servidores cloud
-    ahora = datetime.now()
-    hora_12h = ahora.strftime("%I:%M:%S %p")
-    hora_exacta_num = int(ahora.strftime("%I"))
+    # Estampado de tiempo nativo de la CDMX (Formato de 12 horas)
+    zona_horaria_mx = pytz.timezone("America/Mexico_City")
+    ahora_mx = datetime.now(zona_horaria_mx)
+    hora_12h = ahora_mx.strftime("%I:%M:%S %p")
+    hora_exacta_num = int(ahora_mx.strftime("%I"))
 
     documento = {
         "valor_bruto": valor_a_procesar,
@@ -76,30 +80,40 @@ async def recibir_datos(data: SensorData):
         "alerta_critica": alerta,
         "fecha_hora": hora_12h,  
         "hora_exacta": hora_exacta_num,
-        "dia_semana": ahora.strftime("%A")
+        "dia_semana": ahora_mx.strftime("%A")
     }
     
-    # Transmitimos instantáneamente al frontend por WebSocket (Cero latencia)
+    # 1. TRANSMISIÓN EN TIEMPO REAL: Se envía al frontend instantáneamente por la RAM (Cero latencia)
     await manager.broadcast(documento)
     
-    # Guardamos el respaldo en MongoDB Atlas
+    # 2. ALMACENAMIENTO DE RESPALDO: Se guarda en MongoDB en segundo plano
     coleccion.insert_one(documento)
     
-    return {"status": "entregado_inmediato"}
+    return {"status": "procesado_y_transmitido"}
 
-# Canal WebSocket para la interfaz web
-@websocket_route("/ws/en_vivo")
+# Ruta del Canal WebSocket para el Dashboard
+@app.websocket("/ws/live")
 async def websocket_endpoint(websocket: WebSocket):
-    await manager.connect(websocket)
+    await manager.class_connect(websocket)
     try:
         while True:
-            await websocket.receive_text() # Mantiene la conexión viva
+            # Mantiene la conexión abierta escuchando señales de vida
+            await websocket.receive_text()
     except WebSocketDisconnect:
-        manager.disconnect(websocket)
+        manager.class_disconnect(websocket)
 
+# --- ENRUTAMIENTO DE LA INTERFAZ WEB ---
 @app.get("/", response_class=HTMLResponse)
 async def leer_interfaz(request: Request):
     return templates.TemplateResponse("index.html", {"request": request})
+
+# Carga inicial rápida: Trae solo los últimos 10 registros al abrir la página
+@app.get("/api/historial/inicial")
+async def obtener_inicial():
+    datos = list(coleccion.find().sort("$natural", -1).limit(10))
+    for d in datos:
+        d["_id"] = str(d["_id"])
+    return datos
 
 @app.get("/api/historial/alertas")
 async def obtener_alertas():
