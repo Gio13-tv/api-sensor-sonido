@@ -9,10 +9,10 @@ from pymongo import MongoClient
 
 app = FastAPI()
 
-# 1. DEFINICIÓN OBLIGATORIA DE TEMPLATES (Corrige el error de tu VS Code)
+# Carpetas de vistas
 templates = Jinja2Templates(directory="templates")
 
-# Conexión optimizada a MongoDB Atlas
+# Conexión limpia a MongoDB Atlas
 MONGO_URI = "mongodb+srv://esp32:paTos123@cluster0.0wdqvuo.mongodb.net/?appName=Cluster0"
 client = MongoClient(MONGO_URI)
 db = client["proy"]
@@ -21,7 +21,7 @@ coleccion = db["registrossonido"]
 class SensorData(BaseModel):
     valor_bruto: int
 
-# --- ADMINISTRADOR DE WEBSOCKETS EN MEMORIA RAM ---
+# --- CONTROLADOR GLOBAL DE CONEXIONES VIVAS ---
 class ConnectionManager:
     def __init__(self):
         self.active_connections: list[WebSocket] = []
@@ -47,16 +47,19 @@ manager = ConnectionManager()
 async def recibir_datos(data: SensorData):
     ruido_real = data.valor_bruto
 
-    # Filtro de umbral para ignorar el ruido estático del protoboard
-    if ruido_real < 120:
+    # Filtro automático: Si el sensor físico se traba en 4095 por falso contacto,
+    # lo mandamos a 0 para que la gráfica no se quede congelada arriba.
+    if ruido_real >= 4095:
+        valor_a_procesar = 0
+    elif ruido_real < 120:
         valor_a_procesar = 0
     else:
         valor_a_procesar = ruido_real
 
-    # Mapeo matemático directo basado en tu umbral de 700 unidades
+    # Mapeo a porcentaje basado en tu tope de 700 unidades
     porcentaje = min(int((valor_a_procesar / 700) * 100), 100)
     
-    # Clasificación estricta de rangos (Pasa limpio por Silencio, Moderado y Alto)
+    # Clasificación exacta de categorías
     if porcentaje < 15:
         categoria = "Silencio"
         alerta = False
@@ -67,14 +70,13 @@ async def recibir_datos(data: SensorData):
         categoria = "Ruido Alto"
         alerta = True
 
-    # Tiempo nativo de la CDMX (Formato de 12 horas)
     zona_horaria_mx = pytz.timezone("America/Mexico_City")
     ahora_mx = datetime.now(zona_horaria_mx)
     hora_12h = ahora_mx.strftime("%I:%M:%S %p")
     hora_exacta_num = int(ahora_mx.strftime("%I"))
 
     documento = {
-        "valor_bruto": valor_a_procesar,
+        "valor_bruto": ruido_real, 
         "porcentaje": porcentaje,
         "categoria": categoria,
         "alerta_critica": alerta,
@@ -83,32 +85,31 @@ async def recibir_datos(data: SensorData):
         "dia_semana": ahora_mx.strftime("%A")
     }
     
-    # Transmisión síncrona inmediata por WebSocket (RAM)
+    # Transmitir de golpe por la RAM a los navegadores abiertos
     await manager.broadcast(documento)
     
-    # Inserción en segundo plano en MongoDB Atlas (Tus 7,000 registros históricos)
+    # Guardar respaldo en la base de datos
     coleccion.insert_one(documento)
     
-    return {"status": "ok_transmitido"}
+    return {"status": "enviado_al_vuelo"}
 
-# --- RUTA CORREGIDA DEL CANAL WEBSOCKET ---
+# --- CONFIGURACIÓN ESTÁNDAR DE WEBSOCKET PARA EVITAR EL 404 ---
 @app.websocket("/ws/live")
 async def websocket_endpoint(websocket: WebSocket):
     await manager.connect(websocket)
     try:
         while True:
-            await websocket.receive_text()  # Mantiene el canal abierto
+            # Escucha activa para mantener el canal abierto sin cerrarse por inactividad
+            await websocket.receive_text()
     except WebSocketDisconnect:
         manager.disconnect(websocket)
 
-# --- ENRUTAMIENTO DE LA INTERFAZ WEB ---
 @app.get("/", response_class=HTMLResponse)
 async def leer_interfaz(request: Request):
     return templates.TemplateResponse("index.html", {"request": request})
 
 @app.get("/api/historial/inicial")
 async def obtener_inicial():
-    # Carga inicial rápida de los últimos 10 datos para no saturar con los 7,000 registros
     datos = list(coleccion.find().sort("$natural", -1).limit(10))
     for d in datos:
         d["_id"] = str(d["_id"])
