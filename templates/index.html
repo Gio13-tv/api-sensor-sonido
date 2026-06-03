@@ -10,6 +10,8 @@
 <body class="bg-slate-950 text-slate-100 min-h-screen font-sans p-6">
 
     <div class="max-w-5xl mx-auto space-y-6">
+
+        <!-- Header -->
         <header class="flex justify-between items-center border-b border-slate-800 pb-4">
             <h1 class="text-3xl font-bold tracking-tight text-cyan-400">
                 SONIDO<span class="text-white">Flop</span>
@@ -20,7 +22,7 @@
             </span>
         </header>
 
-        <!-- Tarjetas de resumen -->
+        <!-- Tarjetas de resumen (último dato en vivo) -->
         <div class="grid grid-cols-3 gap-4">
             <div class="bg-slate-900 border border-slate-800 rounded-xl p-4 text-center">
                 <p class="text-xs text-slate-500 uppercase tracking-widest mb-1">Último valor</p>
@@ -36,7 +38,27 @@
             </div>
         </div>
 
-        <!-- Gráfica -->
+        <!-- Contadores de sesión -->
+        <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
+            <div class="bg-slate-900 border border-slate-800 rounded-xl p-4 text-center">
+                <p class="text-xs text-slate-500 uppercase tracking-widest mb-1">Registros totales</p>
+                <p id="cntTotal" class="text-3xl font-bold text-white">0</p>
+            </div>
+            <div class="bg-slate-900 border border-emerald-900/40 rounded-xl p-4 text-center">
+                <p class="text-xs text-emerald-600 uppercase tracking-widest mb-1">Silencios</p>
+                <p id="cntSilencio" class="text-3xl font-bold text-emerald-400">0</p>
+            </div>
+            <div class="bg-slate-900 border border-yellow-900/40 rounded-xl p-4 text-center">
+                <p class="text-xs text-yellow-600 uppercase tracking-widest mb-1">Moderados</p>
+                <p id="cntModerado" class="text-3xl font-bold text-yellow-400">0</p>
+            </div>
+            <div class="bg-slate-900 border border-red-900/40 rounded-xl p-4 text-center">
+                <p class="text-xs text-red-600 uppercase tracking-widest mb-1">Alertas críticas</p>
+                <p id="cntAlerta" class="text-3xl font-bold text-red-400">0</p>
+            </div>
+        </div>
+
+        <!-- Gráfica en tiempo real -->
         <div class="bg-slate-900 border border-slate-800 rounded-xl p-6 shadow-xl">
             <h2 class="text-xl font-semibold mb-4 text-slate-300">
                 Detección de ruido en tiempo real
@@ -46,7 +68,37 @@
             </div>
         </div>
 
-        <!-- Panel inferior -->
+        <!-- Filtro por día de la semana -->
+        <div class="bg-slate-900 border border-slate-800 rounded-xl p-6">
+            <h3 class="text-lg font-medium text-slate-200 mb-4">Filtrar historial por día de la semana</h3>
+            <div class="flex flex-wrap gap-3 items-end">
+                <div class="flex flex-col gap-1">
+                    <label class="text-xs text-slate-500 uppercase tracking-widest">Día</label>
+                    <select id="diaSelect"
+                        class="bg-slate-800 border border-slate-700 text-slate-200 text-sm rounded-lg px-3 py-2 focus:outline-none focus:border-cyan-500 cursor-pointer">
+                        <option value="">-- Selecciona un día --</option>
+                        <option value="Monday">Lunes</option>
+                        <option value="Tuesday">Martes</option>
+                        <option value="Wednesday">Miércoles</option>
+                        <option value="Thursday">Jueves</option>
+                        <option value="Friday">Viernes</option>
+                        <option value="Saturday">Sábado</option>
+                        <option value="Sunday">Domingo</option>
+                    </select>
+                </div>
+                <button onclick="aplicarFiltroDia()"
+                    class="bg-cyan-700 hover:bg-cyan-600 text-white text-sm font-medium px-4 py-2 rounded-lg transition cursor-pointer">
+                    Aplicar filtro
+                </button>
+                <button onclick="limpiarFiltro()"
+                    class="bg-slate-700 hover:bg-slate-600 text-slate-200 text-sm font-medium px-4 py-2 rounded-lg transition cursor-pointer">
+                    Limpiar
+                </button>
+                <span id="resultadoFiltro" class="text-xs text-slate-500 italic"></span>
+            </div>
+        </div>
+
+                <!-- Panel inferior: control + tabla -->
         <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
             <div class="md:col-span-1 bg-slate-900 border border-slate-800 rounded-xl p-6 flex flex-col gap-4">
                 <h3 class="text-lg font-medium text-slate-200">Panel de Control</h3>
@@ -77,7 +129,8 @@
                 </div>
             </div>
         </div>
-    </div>
+
+    </div><!-- fin max-w -->
 
     <script>
         // ── Gráfica ────────────────────────────────────────────────────────────
@@ -101,13 +154,10 @@
             options: {
                 responsive: true,
                 maintainAspectRatio: false,
-                // ✅ FIX: animación desactivada para que la gráfica no "congele"
-                //    al recibir datos rápidos
                 animation: false,
                 scales: {
                     y: {
-                        min: 0,
-                        max: 100,
+                        min: 0, max: 100,
                         grid: { color: '#1e293b' },
                         ticks: { color: '#94a3b8' }
                     },
@@ -116,42 +166,62 @@
                         ticks: { color: '#94a3b8', maxRotation: 45 }
                     }
                 },
-                plugins: {
-                    legend: { labels: { color: '#cbd5e1' } }
-                }
+                plugins: { legend: { labels: { color: '#cbd5e1' } } }
             }
         });
 
         // ── Estado global ──────────────────────────────────────────────────────
-        const tabla = document.getElementById('tablaCuerpo');
-        const estado = document.getElementById('estadoConexion');
+        const tabla      = document.getElementById('tablaCuerpo');
+        const estado     = document.getElementById('estadoConexion');
         const MAX_PUNTOS = 15;
-        let miWebSocket = null;
+        let miWebSocket  = null;
         let reconectando = false;
 
-        // ── Helpers de color ───────────────────────────────────────────────────
+        // ── Helpers ────────────────────────────────────────────────────────────
         function colorCategoria(cat) {
             if (cat === 'Ruido Alto') return 'text-red-400';
             if (cat === 'Moderado')   return 'text-yellow-400';
             return 'text-green-400';
         }
 
-        // ── Actualiza las tarjetas de resumen ──────────────────────────────────
+        function filaHTML(d) {
+            return `
+                <tr class="border-b border-slate-800 hover:bg-slate-800/40 transition">
+                    <td class="px-4 py-3 text-slate-300">${d.fecha_hora}</td>
+                    <td class="px-4 py-3 font-semibold ${colorCategoria(d.categoria)}">${d.categoria}</td>
+                    <td class="px-4 py-3 text-slate-400 font-mono">${d.porcentaje}% (${d.valor_bruto})</td>
+                </tr>`;
+        }
+
+        // ── Contadores desde MongoDB ───────────────────────────────────────────
+        async function cargarEstadisticas() {
+            try {
+                const res  = await fetch('/api/estadisticas');
+                const data = await res.json();
+                document.getElementById('cntTotal').textContent    = data.total;
+                document.getElementById('cntSilencio').textContent = data.silencio;
+                document.getElementById('cntModerado').textContent = data.moderado;
+                document.getElementById('cntAlerta').textContent   = data.alerta;
+            } catch (err) {
+                console.warn('Error cargando estadísticas:', err);
+            }
+        }
+
+        // ── Tarjetas de último dato ────────────────────────────────────────────
         function actualizarTarjetas(d) {
             document.getElementById('cardValor').textContent     = d.porcentaje + '%';
             document.getElementById('cardCategoria').textContent = d.categoria;
             document.getElementById('cardHora').textContent      = d.fecha_hora;
-
             const colores = {
-                'Ruido Alto' : 'text-red-400',
-                'Moderado'   : 'text-yellow-400',
-                'Silencio'   : 'text-green-400'
+                'Ruido Alto': 'text-red-400',
+                'Moderado'  : 'text-yellow-400',
+                'Silencio'  : 'text-green-400'
             };
             document.getElementById('cardCategoria').className =
                 'text-2xl font-bold ' + (colores[d.categoria] || 'text-slate-300');
         }
 
-        // ── Añade un punto a la gráfica ────────────────────────────────────────
+        // ── Gráfica ────────────────────────────────────────────────────────────
         function agregarPuntoGrafica(d) {
             if (chart.data.labels.length >= MAX_PUNTOS) {
                 chart.data.labels.shift();
@@ -159,12 +229,10 @@
             }
             chart.data.labels.push(d.fecha_hora);
             chart.data.datasets[0].data.push(d.porcentaje);
-
-            // ✅ FIX: 'none' evita que Chart.js encole animaciones y congele
             chart.update('none');
         }
 
-        // ── Añade fila a la tabla ──────────────────────────────────────────────
+        // ── Tabla en vivo ──────────────────────────────────────────────────────
         function agregarFilaTabla(d) {
             const fila = document.createElement('tr');
             fila.className = 'border-b border-slate-800 hover:bg-slate-800/40 transition';
@@ -177,68 +245,115 @@
             if (tabla.children.length > 15) tabla.lastElementChild.remove();
         }
 
-        // ── Carga historial inicial desde Mongo ────────────────────────────────
-        async function preinicializarDashboard() {
+        // ── Filtro por día — consulta real a MongoDB ────────────────────────────
+        const diasLabel = {
+            Monday: 'Lunes', Tuesday: 'Martes', Wednesday: 'Miércoles',
+            Thursday: 'Jueves', Friday: 'Viernes', Saturday: 'Sábado', Sunday: 'Domingo'
+        };
+
+        async function aplicarFiltroDia() {
+            const dia    = document.getElementById('diaSelect').value;
+            const msgEl  = document.getElementById('resultadoFiltro');
+
+            if (!dia) {
+                msgEl.textContent = 'Selecciona un día.';
+                return;
+            }
+
+            msgEl.textContent = 'Consultando MongoDB...';
+            document.getElementById('tituloTabla').textContent =
+                `Registros del ${diasLabel[dia]}`;
+
             try {
-                const res  = await fetch('/api/historial/inicial');
+                const res   = await fetch(`/api/historial/filtro?dia=${dia}`);
                 const datos = await res.json();
 
-                // Gráfica: datos en orden cronológico ascendente
+                if (datos.error) {
+                    msgEl.textContent = datos.error;
+                    return;
+                }
+
+                msgEl.textContent = `${datos.length} registro${datos.length !== 1 ? 's' : ''} encontrado${datos.length !== 1 ? 's' : ''} en MongoDB.`;
+
+                tabla.innerHTML = datos.length === 0
+                    ? `<tr><td colspan="3" class="px-4 py-6 text-center text-slate-500">
+                           Sin registros para el ${diasLabel[dia]}.</td></tr>`
+                    : datos.map(filaHTML).join('');
+            } catch (err) {
+                msgEl.textContent = 'Error al consultar MongoDB.';
+                console.error(err);
+            }
+        }
+
+        async function limpiarFiltro() {
+            document.getElementById('diaSelect').value            = '';
+            document.getElementById('resultadoFiltro').textContent = '';
+            document.getElementById('tituloTabla').textContent    = 'Datos Recientes';
+            try {
+                const res   = await fetch('/api/historial/inicial');
+                const datos = await res.json();
+                tabla.innerHTML = datos.map(filaHTML).join('');
+            } catch (err) {
+                console.warn(err);
+            }
+        }
+
+                // ── Carga historial inicial desde MongoDB ──────────────────────────────
+        async function preinicializarDashboard() {
+            // Ambas llamadas en paralelo para no esperar dos veces
+            const [resHist, _] = await Promise.allSettled([
+                fetch('/api/historial/inicial'),
+                cargarEstadisticas()       // ← contadores reales de toda la BD
+            ]);
+
+            if (resHist.status === 'fulfilled') {
+                const datos = await resHist.value.json();
+
+                // Gráfica
                 const asc = [...datos].reverse();
-                chart.data.labels                = asc.map(d => d.fecha_hora);
-                chart.data.datasets[0].data      = asc.map(d => d.porcentaje);
+                chart.data.labels           = asc.map(d => d.fecha_hora);
+                chart.data.datasets[0].data = asc.map(d => d.porcentaje);
                 chart.update('none');
 
-                // Tabla: el más reciente primero
-                tabla.innerHTML = datos.map(d => `
-                    <tr class="border-b border-slate-800 hover:bg-slate-800/40 transition">
-                        <td class="px-4 py-3 text-slate-300">${d.fecha_hora}</td>
-                        <td class="px-4 py-3 font-semibold ${colorCategoria(d.categoria)}">${d.categoria}</td>
-                        <td class="px-4 py-3 text-slate-400 font-mono">${d.porcentaje}% (${d.valor_bruto})</td>
-                    </tr>
-                `).join('');
-            } catch (err) {
-                console.warn('Sin historial inicial:', err);
+                // Tarjetas
+                if (datos.length > 0) actualizarTarjetas(datos[0]);
+
+                // Tabla
+                tabla.innerHTML = datos.map(filaHTML).join('');
             }
         }
 
         // ── WebSocket ──────────────────────────────────────────────────────────
         function conectarWebSocket() {
-            // ✅ FIX: evita abrir múltiples conexiones simultáneas
             if (miWebSocket &&
                 (miWebSocket.readyState === WebSocket.CONNECTING ||
-                 miWebSocket.readyState === WebSocket.OPEN)) {
-                return;
-            }
+                 miWebSocket.readyState === WebSocket.OPEN)) return;
 
             const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
             miWebSocket = new WebSocket(`${protocol}//${location.host}/ws/live`);
 
             miWebSocket.onopen = () => {
                 reconectando = false;
-                estado.textContent  = 'Transmisión en Vivo Activa';
-                estado.className    =
+                estado.textContent = 'Transmisión en Vivo Activa';
+                estado.className   =
                     'bg-emerald-500/10 text-emerald-400 text-xs font-medium px-2.5 py-0.5 rounded-full border border-emerald-500/20';
-                console.log('[WS] Conectado');
             };
 
             miWebSocket.onmessage = (event) => {
                 const d = JSON.parse(event.data);
-
-                // ✅ FIX: ignorar los frames de ping del servidor
                 if (d.tipo === 'ping') return;
 
                 actualizarTarjetas(d);
                 agregarPuntoGrafica(d);
                 agregarFilaTabla(d);
+                // Refresca contadores reales desde MongoDB tras cada dato nuevo
+                cargarEstadisticas();
             };
 
             miWebSocket.onclose = () => {
-                estado.textContent  = 'Desconectado — Reconectando...';
-                estado.className    =
+                estado.textContent = 'Desconectado — Reconectando...';
+                estado.className   =
                     'bg-red-500/10 text-red-400 text-xs font-medium px-2.5 py-0.5 rounded-full border border-red-500/20';
-
-                // ✅ FIX: backoff suave para no spamear reconexiones
                 if (!reconectando) {
                     reconectando = true;
                     setTimeout(conectarWebSocket, 3000);
@@ -268,8 +383,7 @@
                         <td class="px-4 py-3 text-slate-300">${d.fecha_hora}</td>
                         <td class="px-4 py-3 text-red-400 font-bold">${d.categoria}</td>
                         <td class="px-4 py-3 font-mono">${d.porcentaje}% (${d.valor_bruto})</td>
-                    </tr>
-                `).join('');
+                    </tr>`).join('');
             } catch (err) {
                 console.error('Error cargando alertas:', err);
             }

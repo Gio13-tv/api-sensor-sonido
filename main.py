@@ -65,13 +65,14 @@ async def recibir_datos(data: SensorData):
     print(f"ESP32 → valor bruto: {ruido_real}")
     print(f"{'='*40}\n")
  
-    # Filtros de ADC roto / pin pegado
-    if ruido_real >= 4095 or ruido_real < 120:
+   
+    # Elimina el filtro de 4095 y el de 120, reemplázalo por esto:
+    if ruido_real < 0:
         valor_a_procesar = 0
     else:
         valor_a_procesar = ruido_real
- 
-    porcentaje = min(int((valor_a_procesar / 700) * 100), 100)
+        # Cambia el mapeo: 50 pulsos en 5s ya es bastante ruido
+    porcentaje = min(int((valor_a_procesar / 50) * 100), 100)
  
     if porcentaje < 15:
         categoria = "Silencio"
@@ -149,3 +150,38 @@ async def obtener_alertas():
     for d in datos:
         d["_id"] = str(d["_id"])
     return datos
+
+@app.get("/api/estadisticas")
+async def obtener_estadisticas():
+    """Conteos reales de toda la colección en MongoDB."""
+    def _consultar():
+        total     = coleccion.count_documents({})
+        silencio  = coleccion.count_documents({"categoria": "Silencio"})
+        moderado  = coleccion.count_documents({"categoria": "Moderado"})
+        alerta    = coleccion.count_documents({"alerta_critica": True})
+        return {
+            "total": total,
+            "silencio": silencio,
+            "moderado": moderado,
+            "alerta": alerta,
+        }
+    return await asyncio.to_thread(_consultar)
+ 
+ 
+@app.get("/api/historial/filtro")
+async def filtrar_por_dia(dia: str):
+    """
+    Filtra registros por día de la semana (en inglés, como lo guarda strftime).
+    Ejemplo: /api/historial/filtro?dia=Monday
+    Días válidos: Monday, Tuesday, Wednesday, Thursday, Friday, Saturday, Sunday
+    """
+    dias_validos = {"Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"}
+    if dia not in dias_validos:
+        return {"error": f"Día inválido: {dia}"}
+ 
+    def _consultar():
+        datos = list(coleccion.find({"dia_semana": dia}).sort("$natural", -1).limit(100))
+        for d in datos:
+            d["_id"] = str(d["_id"])
+        return datos
+    return await asyncio.to_thread(_consultar)
